@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USB 打印机 - ESP32-S3 打印服务器</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>USB 打印机</h1>
+            <a href="/index.html" class="back-link">← 返回首页</a>
+        </header>
+
+        <!-- 打印机列表 -->
+        <div class="card">
+            <h2>USB 打印机列表</h2>
+            <div id="printers" class="printers">
+                <!-- 打印机列表将在这里动态生成 -->
+                <div class="printer-card" id="printer0">
+                    <div class="printer-header">
+                        <h3>打印机 1</h3>
+                        <span class="status status-disconnected" id="status0">未连接</span>
+                    </div>
+                    <div class="printer-info">
+                        <p>设备名称：<span id="name0">--</span></p>
+                        <p>序列号：<span id="serial0">--</span></p>
+                        <p>状态：<span id="state0">--</span></p>
+                        <p>最后活动：<span id="active0">--</span></p>
+                        <p>TCP 端口：<span id="port0">9100</span></p>
+                    </div>
+                </div>
+
+                <div class="printer-card" id="printer1">
+                    <div class="printer-header">
+                        <h3>打印机 2</h3>
+                        <span class="status status-disconnected" id="status1">未连接</span>
+                    </div>
+                    <div class="printer-info">
+                        <p>设备名称：<span id="name1">--</span></p>
+                        <p>序列号：<span id="serial1">--</span></p>
+                        <p>状态：<span id="state1">--</span></p>
+                        <p>最后活动：<span id="active1">--</span></p>
+                        <p>TCP 端口：<span id="port1">9101</span></p>
+                    </div>
+                </div>
+
+                <div class="printer-card" id="printer2">
+                    <div class="printer-header">
+                        <h3>打印机 3</h3>
+                        <span class="status status-disconnected" id="status2">未连接</span>
+                    </div>
+                    <div class="printer-info">
+                        <p>设备名称：<span id="name2">--</span></p>
+                        <p>序列号：<span id="serial2">--</span></p>
+                        <p>状态：<span id="state2">--</span></p>
+                        <p>最后活动：<span id="active2">--</span></p>
+                        <p>TCP 端口：<span id="port2">9102</span></p>
+                    </div>
+                </div>
+
+                <div class="printer-card" id="printer3">
+                    <div class="printer-header">
+                        <h3>打印机 4</h3>
+                        <span class="status status-disconnected" id="status3">未连接</span>
+                    </div>
+                    <div class="printer-info">
+                        <p>设备名称：<span id="name3">--</span></p>
+                        <p>序列号：<span id="serial3">--</span></p>
+                        <p>状态：<span id="state3">--</span></p>
+                        <p>最后活动：<span id="active3">--</span></p>
+                        <p>TCP 端口：<span id="port3">9103</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 打印机信息 -->
+        <div class="card">
+            <h2>打印机信息</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="label">已连接打印机:</span>
+                    <span class="value" id="connected_count">0</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">就绪打印机:</span>
+                    <span class="value" id="ready_count">0</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">忙碌打印机:</span>
+                    <span class="value" id="busy_count">0</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">异常打印机:</span>
+                    <span class="value" id="error_count">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 端口绑定管理 -->
+        <div class="card">
+            <h2>打印机端口绑定管理</h2>
+            <div class="binding-form">
+                <div class="form-group">
+                    <label>打印机序列号：</label>
+                    <input type="text" id="bind_serial" placeholder="输入序列号 (如: XYZ123)" maxlength="31">
+                </div>
+                <div class="form-group">
+                    <label>TCP 端口：</label>
+                    <input type="number" id="bind_port" placeholder="输入端口号 (9100-65535)" min="9100" max="65535" value="9100">
+                </div>
+                <div class="form-group">
+                    <label>备注：</label>
+                    <input type="text" id="bind_remark" placeholder="输入备注（最多16个字符，支持中文）" maxlength="16">
+                    <p class="form-hint">备注信息最多16个字符，支持中文</p>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-primary" onclick="bindPrinter()">绑定端口</button>
+                </div>
+                <div id="bind_result" class="bind-result"></div>
+            </div>
+            
+            <h3>当前设备</h3>
+            <div class="binding-rules">
+                <table class="binding-table">
+                    <thead>
+                        <tr>
+                            <th>打印机序列号（已绑定的）</th>
+                            <th>绑定端口（已绑定的端口）</th>
+                            <th>备注：</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="binding_list">
+                        <!-- 动态加载已绑定的设备 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+        // 更新打印机状态
+        function updatePrinters() {
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    const printers = data.printers || [];
+                    let connected = 0, ready = 0, busy = 0, error = 0;
+
+                    for (let i = 0; i < 4; i++) {
+                        const printer = printers[i];
+                        const statusEl = document.getElementById(`status${i}`);
+                        const nameEl = document.getElementById(`name${i}`);
+                        const serialEl = document.getElementById(`serial${i}`);
+                        const stateEl = document.getElementById(`state${i}`);
+                        const activeEl = document.getElementById(`active${i}`);
+
+                        if (printer && printer.status !== 0) {
+                            connected++;
+                            nameEl.textContent = printer.name || '--';
+                            serialEl.textContent = printer.serial_number || '--';
+
+                            if (printer.status === 1) {
+                                statusEl.textContent = '就绪';
+                                statusEl.className = 'status status-ready';
+                                stateEl.textContent = '正常';
+                                ready++;
+                            } else if (printer.status === 2) {
+                                statusEl.textContent = '异常';
+                                statusEl.className = 'status status-error';
+                                stateEl.textContent = '异常';
+                                error++;
+                            } else if (printer.status === 3) {
+                                statusEl.textContent = '忙碌';
+                                statusEl.className = 'status status-busy';
+                                stateEl.textContent = '打印中';
+                                busy++;
+                            }
+
+                            activeEl.textContent = formatTime(printer.last_active_time);
+                        } else {
+                            statusEl.textContent = '未连接';
+                            statusEl.className = 'status status-disconnected';
+                            nameEl.textContent = '--';
+                            serialEl.textContent = '--';
+                            stateEl.textContent = '--';
+                            activeEl.textContent = '--';
+                        }
+                    }
+
+                    document.getElementById('connected_count').textContent = connected;
+                    document.getElementById('ready_count').textContent = ready;
+                    document.getElementById('busy_count').textContent = busy;
+                    document.getElementById('error_count').textContent = error;
+                })
+                .catch(error => {
+                    console.error('获取打印机状态失败:', error);
+                });
+        }
+
+        // 格式化时间
+        function formatTime(timestamp) {
+            if (!timestamp) return '--';
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString('zh-CN');
+        }
+
+        // 绑定打印机
+        function bindPrinter() {
+            const serial = document.getElementById('bind_serial').value.trim();
+            const port = parseInt(document.getElementById('bind_port').value);
+            const remark = document.getElementById('bind_remark').value.trim();
+            const resultEl = document.getElementById('bind_result');
+            
+            if (!serial) {
+                resultEl.innerHTML = '<span class="error">请输入序列号</span>';
+                return;
+            }
+            if (port < 1024 || port > 65535) {
+                resultEl.innerHTML = '<span class="error">端口范围必须在 1024-65535 之间</span>';
+                return;
+            }
+            if (remark && remark.length > 16) {
+                resultEl.innerHTML = '<span class="error">备注信息最多16个字符</span>';
+                return;
+            }
+            
+            const requestData = {serial: serial, port: port};
+            if (remark && remark.length > 0) {
+                requestData.remark = remark;
+            }
+            
+            fetch('/bind', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(requestData)
+            })
+            .then(async res => {
+                const text = await res.text();
+                try {
+                    // 尝试解析为 JSON
+                    const data = JSON.parse(text);
+                    if (data.status === 'success') {
+                        resultEl.innerHTML = '<span class="success">绑定成功！</span>';
+                        updateBindings();
+                    } else {
+                        resultEl.innerHTML = '<span class="error">绑定失败: ' + (data.message || '未知错误') + '</span>';
+                    }
+                } catch (e) {
+                    // 如果不是 JSON，显示文本内容
+                    if (res.ok) {
+                        resultEl.innerHTML = '<span class="success">绑定成功！</span>';
+                        updateBindings();
+                    } else {
+                        resultEl.innerHTML = '<span class="error">绑定失败: ' + text + '</span>';
+                    }
+                }
+            })
+            .catch(error => {
+                resultEl.innerHTML = '<span class="error">绑定失败: ' + error.message + '</span>';
+            });
+        }
+        
+        // 填充绑定表单
+        function fillBindForm(serial, port, remark) {
+            document.getElementById('bind_serial').value = serial;
+            document.getElementById('bind_port').value = port;
+            if (remark) {
+                document.getElementById('bind_remark').value = remark;
+            }
+        }
+        
+        // 更新绑定列表
+        function updateBindings() {
+            fetch('/api/bindings')
+                .then(res => res.json())
+                .then(data => {
+                    const tbody = document.getElementById('binding_list');
+                    if (data.bindings && data.bindings.length > 0) {
+                        tbody.innerHTML = data.bindings.map(b => 
+                            `<tr>
+                                <td>${b.serial}</td>
+                                <td>${b.port}</td>
+                                <td>${b.remark || '--'}</td>
+                                <td><button class="btn btn-small btn-danger" onclick="unbindPrinterBySerial('${b.serial}')">解绑</button></td>
+                            </tr>`
+                        ).join('');
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">暂无已绑定的设备</td></tr>';
+                    }
+                })
+                .catch(error => {
+                    console.error('获取绑定列表失败:', error);
+                });
+        }
+        
+        // 根据序列号解绑
+        function unbindPrinterBySerial(serial) {
+            const resultEl = document.getElementById('bind_result');
+            
+            if (!serial) {
+                resultEl.innerHTML = '<span class="error">序列号不能为空</span>';
+                return;
+            }
+            
+            fetch('/unbind', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({serial: serial})
+            })
+            .then(async res => {
+                const text = await res.text();
+                try {
+                    // 尝试解析为 JSON
+                    const data = JSON.parse(text);
+                    if (data.status === 'success') {
+                        resultEl.innerHTML = '<span class="success">解绑成功！</span>';
+                        updateBindings();
+                    } else {
+                        resultEl.innerHTML = '<span class="error">解绑失败: ' + (data.message || '未知错误') + '</span>';
+                    }
+                } catch (e) {
+                    // 如果不是 JSON，显示文本内容
+                    if (res.ok) {
+                        resultEl.innerHTML = '<span class="success">解绑成功！</span>';
+                        updateBindings();
+                    } else {
+                        resultEl.innerHTML = '<span class="error">解绑失败: ' + text + '</span>';
+                    }
+                }
+            })
+            .catch(error => {
+                resultEl.innerHTML = '<span class="error">解绑失败: ' + error.message + '</span>';
+            });
+        }
+        
+        // 定时更新
+        setInterval(updatePrinters, 2000);
+        setInterval(updateBindings, 5000);
+        
+        // 初始化
+        updatePrinters();
+        updateBindings();
+    </script>
+</body>
+</html>

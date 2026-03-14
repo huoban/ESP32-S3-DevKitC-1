@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网站监控 - ESP32-S3 打印服务器</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>网站监控</h1>
+            <a href="/index.html" class="back-link">← 返回首页</a>
+        </header>
+
+        <!-- 监控网站列表 -->
+        <div class="card">
+            <h2>监控网站列表</h2>
+            <div id="sites" class="sites">
+                <!-- 网站列表将在这里动态生成 -->
+            </div>
+            <button onclick="addSite()" class="btn btn-primary">添加网站</button>
+        </div>
+
+        <!-- 企业微信配置 -->
+        <div class="card">
+            <h2>企业微信配置</h2>
+            <form id="wechatForm" onsubmit="saveWechatConfig(event)">
+                <div class="form-group">
+                    <label for="corpid">企业 ID (corpid):</label>
+                    <input type="text" id="corpid" name="corpid" placeholder="输入企业 ID">
+                </div>
+                <div class="form-group">
+                    <label for="corpsecret">应用密钥 (corpsecret):</label>
+                    <input type="text" id="corpsecret" name="corpsecret" placeholder="输入应用密钥">
+                </div>
+                <div class="form-group">
+                    <label for="agentid">应用 ID (agentid):</label>
+                    <input type="text" id="agentid" name="agentid" placeholder="输入应用 ID">
+                </div>
+                <div class="form-group">
+                    <label for="touser">接收用户 (touser):</label>
+                    <input type="text" id="touser" name="touser" placeholder="输入接收用户">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">保存配置</button>
+                    <button type="button" onclick="testNotification()" class="btn btn-secondary">发送测试通知</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- 通知记录 -->
+        <div class="card">
+            <h2>通知记录</h2>
+            <div id="notifications" class="notifications">
+                <!-- 通知记录将在这里动态生成 -->
+            </div>
+        </div>
+
+        <!-- 提示信息 -->
+        <div class="card">
+            <h2>提示</h2>
+            <ul class="tips">
+                <li>支持 HTTP 和 HTTPS 网站</li>
+                <li>使用 HEAD 请求获取响应头</li>
+                <li>支持自定义检测间隔和超时时间</li>
+                <li>支持自定义离线确认次数</li>
+                <li>支持自定义在线判断标准（HTTP 状态码）</li>
+                <li>支持企业微信 Webhook 通知</li>
+                <li>通知格式包含：状态、站点名称、时间</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+        // 保存企业微信配置
+        function saveWechatConfig(event) {
+            event.preventDefault();
+
+            const corpid = document.getElementById('corpid').value;
+            const corpsecret = document.getElementById('corpsecret').value;
+            const agentid = document.getElementById('agentid').value;
+            const touser = document.getElementById('touser').value;
+
+            const data = `corpid=${encodeURIComponent(corpid)}&corpsecret=${encodeURIComponent(corpsecret)}&agentid=${encodeURIComponent(agentid)}&touser=${encodeURIComponent(touser)}`;
+
+            fetch('/api/config/wechat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: data
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('配置保存成功！');
+                } else {
+                    alert('配置保存失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('请求失败: ' + error.message);
+            });
+        }
+
+        // 发送测试通知
+        function testNotification() {
+            fetch('/api/monitor/test', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('测试通知发送成功！');
+                } else {
+                    alert('测试通知发送失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('请求失败: ' + error.message);
+            });
+        }
+
+        // 添加网站
+        function addSite() {
+            alert('添加网站功能开发中...');
+        }
+
+        // 更新网站列表
+        function updateSites() {
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    const sites = data.monitor_sites || [];
+                    const sitesEl = document.getElementById('sites');
+                    sitesEl.innerHTML = '';
+
+                    if (sites.length === 0) {
+                        sitesEl.innerHTML = '<p>暂无监控网站</p>';
+                        return;
+                    }
+
+                    sites.forEach(site => {
+                        const siteEl = document.createElement('div');
+                        siteEl.className = 'site-card';
+                        siteEl.innerHTML = `
+                            <div class="site-header">
+                                <h3>${site.name}</h3>
+                                <span class="status ${site.is_online ? 'status-online' : 'status-offline'}">
+                                    ${site.is_online ? '在线' : '离线'}
+                                </span>
+                            </div>
+                            <div class="site-info">
+                                <p>URL: ${site.url}</p>
+                                <p>最后检测: ${formatTime(site.last_check_time)}</p>
+                                <p>失败次数: ${site.fail_count}</p>
+                            </div>
+                            <div class="site-actions">
+                                <button onclick="removeSite('${site.name}')" class="btn btn-danger btn-sm">删除</button>
+                            </div>
+                        `;
+                        sitesEl.appendChild(siteEl);
+                    });
+                })
+                .catch(error => {
+                    console.error('获取网站列表失败:', error);
+                });
+        }
+
+        // 删除网站
+        function removeSite(name) {
+            if (!confirm(`确定要删除网站 "${name}" 吗？`)) {
+                return;
+            }
+
+            const data = `name=${encodeURIComponent(name)}`;
+
+            fetch('/api/monitor/remove', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: data
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('网站删除成功！');
+                    updateSites();
+                } else {
+                    alert('网站删除失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('请求失败: ' + error.message);
+            });
+        }
+
+        // 格式化时间
+        function formatTime(timestamp) {
+            if (!timestamp) return '--';
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString('zh-CN');
+        }
+
+        // 定时更新网站列表
+        setInterval(updateSites, 5000);
+        updateSites();
+    </script>
+</body>
+</html>

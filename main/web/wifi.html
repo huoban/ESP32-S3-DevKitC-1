@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi 配置 - ESP32-S3 打印服务器</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>WiFi 配置</h1>
+            <a href="/index.html" class="back-link">← 返回首页</a>
+        </header>
+
+        <!-- WiFi 状态 -->
+        <div class="card">
+            <h2>当前状态</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="label">模式:</span>
+                    <span class="value" id="wifi_mode">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">连接状态:</span>
+                    <span class="value" id="wifi_connected">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">IP 地址:</span>
+                    <span class="value" id="wifi_ip">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">SSID:</span>
+                    <span class="value" id="wifi_ssid">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">信号强度:</span>
+                    <span class="value" id="wifi_rssi">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- WiFi 配置 -->
+        <div class="card">
+            <h2>WiFi 配置</h2>
+            <form id="wifiForm" onsubmit="saveWifiConfig(event)">
+                <div class="form-group">
+                    <label for="ssid">WiFi SSID:</label>
+                    <input type="text" id="ssid" name="ssid" required placeholder="输入 WiFi 名称">
+                </div>
+                <div class="form-group">
+                    <label for="password">WiFi 密码:</label>
+                    <input type="password" id="password" name="password" required placeholder="输入 WiFi 密码">
+                </div>
+                
+                <h3 style="margin-top: 20px; margin-bottom: 10px;">高级网络配置（可选）</h3>
+                <div class="form-group">
+                    <label for="ip_address">IP 地址:</label>
+                    <input type="text" id="ip_address" name="ip_address" placeholder="例如：192.168.1.100">
+                </div>
+                <div class="form-group">
+                    <label for="gateway">网关:</label>
+                    <input type="text" id="gateway" name="gateway" placeholder="例如：192.168.1.1">
+                </div>
+                <div class="form-group">
+                    <label for="netmask">子网掩码:</label>
+                    <input type="text" id="netmask" name="netmask" placeholder="例如：255.255.255.0">
+                </div>
+                <div class="form-group">
+                    <label for="dns">DNS 服务器:</label>
+                    <input type="text" id="dns" name="dns" placeholder="例如：119.29.29.29">
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">保存配置并重启</button>
+                    <button type="button" onclick="scanWifi()" class="btn btn-secondary">扫描 WiFi</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- WiFi 列表 -->
+        <div class="card" id="wifiListCard" style="display: none;">
+            <h2>可用的 WiFi 网络</h2>
+            <div id="wifiList" class="wifi-list">
+                <!-- WiFi 列表将在这里动态生成 -->
+            </div>
+        </div>
+
+        <!-- 提示信息 -->
+        <div class="card">
+            <h2>提示</h2>
+            <ul class="tips">
+                <li>配置保存后系统将自动重启</li>
+                <li>如果配置错误，系统将自动进入 AP 模式</li>
+                <li>AP 模式下 SSID 为设备名称，无需密码</li>
+                <li>AP 模式下 IP 地址为 192.168.1.1</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+        // 保存 WiFi 配置
+        function saveWifiConfig(event) {
+            event.preventDefault();
+
+            const ssid = document.getElementById('ssid').value;
+            const password = document.getElementById('password').value;
+            const ipAddress = document.getElementById('ip_address').value;
+            const gateway = document.getElementById('gateway').value;
+            const netmask = document.getElementById('netmask').value;
+            const dns = document.getElementById('dns').value;
+
+            let data = `ssid=${encodeURIComponent(ssid)}&password=${encodeURIComponent(password)}`;
+            
+            // 添加可选的高级配置
+            if (ipAddress) data += `&ip_address=${encodeURIComponent(ipAddress)}`;
+            if (gateway) data += `&gateway=${encodeURIComponent(gateway)}`;
+            if (netmask) data += `&netmask=${encodeURIComponent(netmask)}`;
+            if (dns) data += `&dns=${encodeURIComponent(dns)}`;
+
+            fetch('/api/config/wifi', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: data
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('配置保存成功！系统将重启...');
+                    setTimeout(() => {
+                        location.reload();
+                    }, 2000);
+                } else {
+                    alert('配置保存失败：' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('请求失败：' + error.message);
+            });
+        }
+
+        // 扫描 WiFi
+        function scanWifi() {
+            const wifiListCard = document.getElementById('wifiListCard');
+            const wifiList = document.getElementById('wifiList');
+            
+            wifiList.innerHTML = '<p style="text-align: center; padding: 20px;">正在扫描 WiFi...</p>';
+            wifiListCard.style.display = 'block';
+            
+            fetch('/api/wifi/scan')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.networks && data.networks.length > 0) {
+                        let html = '';
+                        data.networks.forEach(function(network) {
+                            const rssi = network.rssi || 0;
+                            let signalClass = 'signal-weak';
+                            if (rssi > -50) signalClass = 'signal-strong';
+                            else if (rssi > -70) signalClass = 'signal-medium';
+                            
+                            html += `
+                                <div class="wifi-item" onclick="selectWifi('${network.ssid}')">
+                                    <div class="wifi-name">${network.ssid}</div>
+                                    <div class="wifi-signal ${signalClass}">${rssi} dBm</div>
+                                    <div class="wifi-lock">${network.secure ? '🔒' : '🔓'}</div>
+                                </div>
+                            `;
+                        });
+                        wifiList.innerHTML = html;
+                    } else {
+                        wifiList.innerHTML = '<p style="text-align: center; padding: 20px;">未找到 WiFi 网络</p>';
+                    }
+                })
+                .catch(error => {
+                    wifiList.innerHTML = '<p style="text-align: center; padding: 20px; color: red;">扫描失败：' + error.message + '</p>';
+                });
+        }
+        
+        // 选择 WiFi 网络
+        function selectWifi(ssid) {
+            document.getElementById('ssid').value = ssid;
+            document.getElementById('wifiListCard').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
