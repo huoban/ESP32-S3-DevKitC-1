@@ -19,6 +19,25 @@ ESP32-S3 (如 ESP32-S3-DevKitC-1)：原生支持 USB Host，开发更便捷。
 - 直接使用也行 boot键5秒 恢复出厂 192.168.4.1 配置wifi
 
 
+# 只想凑合用
+### Flash Download Tool 配置
+1. 芯片选择 ：ESP32-S3
+2. SPI Speed ：80MHz
+3. SPI Mode ：DIO
+4. Flash Size ：16MB
+
+ 
+### 固件添加顺序（按偏移地址）
+
+| 顺序 | 固件文件 | 偏移地址 | 
+|------|------|------|
+| 1 | bootloader.bin | 0x0 | 
+| 2 | partition-table.bin | 0x8000 | 
+| 3 | ota_data_initial.bin | 0x19000 | 
+| 4 | empty-project.bin | 0x20000 | 
+
+https://github.com/huoban/ESP32-S3-DevKitC-1/releases/
+
   
 # 核心思路（极简）
 
