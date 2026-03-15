@@ -174,7 +174,17 @@ static void ntp_sync_task(void *arg)
             extern void ntp_storage_save_sync_time(time_t timestamp);
             ntp_storage_save_sync_time(sec);
         } else {
-            ESP_LOGE(TAG, "NTP sync failed");
+            ESP_LOGE(TAG, "NTP sync failed, using hardware timer time");
+            
+            time_t hw_sec;
+            uint32_t hw_us;
+            hardware_timer_get_time(&hw_sec, &hw_us);
+            
+            struct timeval tv;
+            tv.tv_sec = hw_sec;
+            tv.tv_usec = hw_us;
+            settimeofday(&tv, NULL);
+            ESP_LOGI(TAG, "System time updated from hardware timer: %ld.%06ld", hw_sec, hw_us);
         }
         
         for (uint32_t i = 0; i < g_sync_interval && g_ntp_running; i++) {
@@ -201,6 +211,17 @@ esp_err_t ntp_client_init(const ntp_client_config_t* config)
     }
     
     hardware_timer_init();
+    
+    time_t sec;
+    uint32_t us;
+    hardware_timer_get_time(&sec, &us);
+    
+    struct timeval tv;
+    tv.tv_sec = sec;
+    tv.tv_usec = us;
+    settimeofday(&tv, NULL);
+    ESP_LOGI(TAG, "System time initialized from hardware timer: %ld.%06ld", sec, us);
+    
     ESP_LOGI(TAG, "NTP client initialized (servers: %s, %s)", g_server1, g_server2);
     return ESP_OK;
 }
