@@ -1,162 +1,150 @@
-# ESP32-S3 打印服务器
+# ESP32-S3-DevKitC-1_N16R8
+- ESP32-USB-Soft-Host-Printer | esp-idf v5.53
 
-基于 ESP-IDF v5.5.3 的 USB 打印服务器项目，支持 WiFi 连接、Web 管理、NTP 时间同步、网络打印等功能。
+# 别问！我也不会，代码AI代写。
+- 母板 ESP32-S3-DevKitC-1开发板N16R8
+- 自己的需求有线usb热敏打印机转无线
+  - 需要选择集成 USB Host 功能的 ESP32 芯片，比如：
+ESP32 (初代，如 ESP32-DevKitC)：
+自带 USB OTG（支持 Host），需外接少量电路；
+ESP32-S3 (如 ESP32-S3-DevKitC-1)：原生支持 USB Host，开发更便捷。
+没有 USB OTG的板子别折腾了
 
----
+- 最后提醒下 只能用esp-idf 原生库支持，剩下第三方库都不行，亲测。
+- 因为板子性能过高，只有基础功能，OTA，NTP，转wifi打印机。剩下功能自己开放吧
 
-版本号：v1.3.0
-时间：2026-03-17 10:30
-PATH环境配置：C:\esp\v5.5.3\esp-idf\components\espcoredump;C:\esp\v5.5.3\esp-idf\components\partition_table;C:\esp\v5.5.3\esp-idf\components\app_update;D:\Espressif\tools\xtensa-esp-elf-gdb\16.3_20250913\xtensa-esp-elf-gdb\bin;D:\Espressif\tools\riscv32-esp-elf-gdb\16.3_20250913\riscv32-esp-elf-gdb\bin;D:\Espressif\tools\xtensa-esp-elf\esp-14.2.0_20251107\xtensa-esp-elf\bin;D:\Espressif\tools\riscv32-esp-elf\esp-14.2.0_20251107\riscv32-esp-elf\bin;D:\Espressif\tools\esp32ulp-elf\2.38_20240113\esp32ulp-elf\bin;D:\Espressif\tools\cmake\3.30.2\bin;D:\Espressif\tools\openocd-esp32\v0.12.0-esp32-20251215\openocd-esp32\bin;D:\Espressif\tools\ninja\1.12.1\;D:\Espressif\tools\idf-exe\1.0.3\;D:\Espressif\tools\ccache\4.12.1\ccache-4.12.1-windows-x86_64;D:\Espressif\tools\dfu-util\0.11\dfu-util-0.11-win64;C:\Users\Administrator\.trae-cn\tools\trae-gopls\current;C:\Users\Administrator\.trae-cn\sdks\workspaces\d610d2a9\versions\node\current;C:\Users\Administrator\.trae-cn\sdks\versions\node\current;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\Git\cmd;C:\Program Files\dotnet\;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;D:\CodeArts-Agent\bin;C:\Program Files\nodejs\;C:\Users\Administrator\scoop\apps\python313\current\Scripts;C:\Users\Administrator\scoop\apps\python313\current;C:\Users\Administrator\scoop\apps\git\current\bin;C:\Users\Administrator\scoop\shims;C:\Users\Administrator\AppData\Local\Microsoft\WindowsApps;C:\Users\Administrator\.dotnet\tools;C:\Users\Administrator\AppData\Local\Programs\WorkBuddy\bin;C:\Users\Administrator\AppData\Roaming\npm
 
-***
+# 使用方法
+- 喂给Ai
+- 使用打印机，先绑定 打印机序列号+端口 后在装驱动在用。 
+- 直接使用也行 同型号板子直接刷固件！
+- boot键5秒 恢复出厂 192.168.4.1 配置wifi
 
-## 新增功能：
 
-- 修复 wifi.c 中 wifi_get_status() 空指针检查缺失
-- 修复 wifi.c 中 4 处不安全的 strcpy() 调用，全部替换为 strlcpy()
-- 修复 printer.c 中冗余的局部变量 NULL 赋值
-- 为 sensors.c 中所有 8 个公共函数添加规范的行首注释
-- 完成全面代码质量检测（功能性、可读性、规范性、健壮性、性能、安全风险）
-- 综合代码评分：89/100（良好水平）
+# ESP32-S3-DevKitC-1_N16R8板子 只想凑合用自己刷
 
-## 删除功能：
+### Flash Download Tool 配置
+1. 芯片选择 ：ESP32-S3
+2. SPI Speed ：80MHz
+3. SPI Mode ：DIO
+4. Flash Size ：16MB
 
-无
+ 
+### 固件添加顺序（按偏移地址）
 
-## 修改功能：
+| 顺序 | 固件文件 | 偏移地址 | 
+|------|------|------|
+| 1 | bootloader.bin | 0x0 | 
+| 2 | partition-table.bin | 0x8000 | 
+| 3 | ota_data_initial.bin | 0x19000 | 
+| 4 | empty-project.bin | 0x20000 | 
 
-- 更新 AI 开发功能说明.txt 文档，添加 v1.3.0 版本历史和代码质量检测记录
-- 为 sensors.c 中的所有公共函数添加规范的行首注释
-- 修复 wifi.c 中的安全漏洞（空指针检查和 strcpy 替换）
+https://github.com/huoban/ESP32-S3-DevKitC-1/releases/
 
-## 当前版本功能详细说明：
+  
+# 核心思路（极简）
 
-### 核心模块架构
+- USB Host 枚举打印机
+- 监听 TCP 9100 端口
+- 电脑发打印数据 → ESP32 收到 → 转发给 USB 打印机
+- 打印机回传状态 → 回给电脑
+- 官方模板 v5.5.3\esp-idf\examples\peripherals\usb\host\usb\_host\_lib
+- 官方说明 USB 主机库的相关信息
+  <https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32s3/api-reference/peripherals/usb_host.html>
 
-项目采用模块化设计，各模块职责分明：
+#### 打印机使用 RAW协议
 
-1. **USB Host 打印机管理** (main/printer.c)
-   - 支持最多 4 台 USB 打印机
-   - 自动枚举和识别打印机设备（USB Class 0x07）
-   - USB 端点数据传输（异步传输，分块处理）
-   - 打印机状态监控和事件处理
-   - 每个打印机独立任务和队列管理
-   - 使用事件组管理打印忙碌状态
+- **工作逻辑**：
+  - ESP32 作为 TCP 服务器，监听  端口；9100、9101、9102、9103
+  - 客户端（电脑 / 手机）将打印数据（原始 ESC/POS/PCL/PS 指令）通过 TCP 直接发送到 ESP32 的 9100 端口；
+  - ESP32 无需解析数据，直接将接收到的字节流通过 USB Host 转发给打印机。
+  - 可绑定 打印机：序列号 转发给特定端口，防止断电枚举usb 映射端口错乱
+#### 一些可能重要的东西
+- ESP-IDF Partition Table
+  
+| Name | Type |SubType|Offset|Size|Flags|
+|------|------|------|------|------|------|
+| nvs | data | nvs | 0x9000 | 64K | 
+| otadata | data | ota | 0x19000 | 8K | 
+| phy_init | data | phy | 0x1b000 | 4K | 
+| app0 | app | ota_0 | 0x20000 | 8056K | 
+| app1 | app | ota_1 | 0x800000 | 8056K | 
 
-2. **WiFi 配置管理** (main/wifi.c, main/config.c)
-   - AP/STA 双模式支持
-   - 静态 IP 配置（IP/网关/掩码/DNS）
-   - WiFi 扫描功能
-   - 配置持久化存储（NVS）
-   - Web 界面配置
+- 因为有缓存，/web 是放PSRAM里跑的，没有的自己改放spiffs里
+- wifi配置、OTA、打印机配置 功能正常，网站监控是模板（无功能）
 
-3. **Web 服务器** (main/web_server.c, main/web_resources.c)
-   - 静态文件服务（从 PSRAM 读取，提升性能）
-   - RESTful API 接口
-   - 支持 HTML/CSS/JS 文件
-   - CORS 跨域支持
-   - OTA 固件上传接口
-   - Web 资源编译时嵌入固件，启动时复制到 PSRAM
+##  核心功能特性 其实这才是重点 usb打印机转无线是附带的
+### NTP 客户端
+✅ 双服务器支持 - ntp.ntsc.ac.cn、ntp1.aliyun.com
+ ✅ 标准 NTPv4 算法
 
-4. **TCP 打印服务器** (main/tcp_server.c)
-   - 监听 9100-9103 端口（4 台打印机）
-   - Socket 客户端管理
-   - 数据转发到 USB 打印机队列
-   - 连接状态监控
-   - 支持打印机序列号与端口绑定
+- 4 个时间戳：T1/T2/T3/T4
+- 时钟偏移 Offset 计算： [(T2-T1)+(T3-T4)]/2
+- 往返延迟 RTT 计算
+- 微秒级精度
+✅ 多次采样滤波 - 6 次采样，中位数算法
+ ✅ 30 分钟自动同步
+ ✅ 硬件定时器时间管理
 
-5. **WebHook 通知系统** (main/web_hook.c)
-   - SMTP 邮件通知（支持 TLS/STARTTLS）
-   - 企业微信通知
-   - 自定义 WebHook 通知
-   - 异步任务发送通知（不阻塞主线程）
-   - 通用 hook API 接口
-   - 配置持久化存储（NVS）
+### NTP 服务端
+✅ UDP 123 端口 - 标准 NTP 协议
+ ✅ 硬件定时器时间源
+ ✅ 兼容 Windows/Linux/Mac/ESP32
+ ✅ 完整 48 字节响应包
 
-6. **系统监控模块** (main/monitor.c)
-   - 网站可用性监控
-   - 监控配置管理（支持多个网站）
-   - 异常通知触发
-   - WebHook 集成
 
-7. **NTP 时间同步** (main/ntp_client.c, main/ntp_server.c)
-   - NTP 客户端（支持多服务器采样和滤波算法）
-   - NTP 服务器（UDP 123 端口，RFC1305 协议）
-   - 硬件定时器时间保持
-   - 时间持久化存储（PSRAM）
+-----
 
-8. **配置管理** (main/config.c, main/nvs_manager.c)
-   - NVS 存储封装
-   - WiFi 配置（SSID/PWD/静态 IP）
-   - 打印机备注管理
-   - WebHook 配置管理
-   - 哈希键名生成（避免 NVS 键名过长）
 
-### 内存管理策略
+## 添加打印机
+Windows 10 添加打印机详细步骤
+方法一：通过控制面板添加（推荐）
 
-- **PSRAM 优先**：大内存（Web 资源、打印机缓冲区、队列数据）优先从 PSRAM 分配
-- **heap_caps_* 函数**：所有动态内存分配使用 ESP-IDF 提供的 heap_caps_malloc/free/realloc/calloc
-- **配对释放**：确保所有分配的内存都有对应的释放
-- **零初始化**：结构体和数组在使用前进行零初始化
+步骤 1：打开控制面板
+  - 按 Win + R，输入 control，回车
+  - 或搜索"控制面板"
 
-### 代码质量保证
+步骤 2：进入设备和打印机
+  - 点击"硬件和声音"
+  - 点击"设备和打印机"
 
-- **安全性**：
-  - 使用 strlcpy 替代 strcpy，避免缓冲区溢出
-  - 完善的空指针检查
-  - 配置验证在早期执行
+步骤 3：添加打印机
+  - 点击顶部"添加打印机"
+  - 点击**"我需要的打印机不在列表中"**
 
-- **健壮性**：
-  - 所有公共函数有参数检查
-  - 错误处理完善，返回正确的 esp_err_t
-  - 使用 ESP_ERROR_CHECK 处理关键错误
+步骤 4：选择添加方式
+  - 选择"使用TCP/IP地址或主机名添加打印机"
+  - 点击"下一步"
 
-- **可读性**：
-  - 所有函数有行首注释（功能描述 + 核心逻辑）
-  - 命名规范统一（Global_/Module_/class_ 前缀）
-  - 模块化设计清晰
+步骤 5：配置端口信息
+  - 设备类型：选择"TCP/IP设备"
+  - 主机名或IP地址：输入ESP32的IP地址（如 192.168.1.100）
+  - 端口名：（自定义9100）
+  - ✅ 取消勾选"查询打印机并自动选择要使用的打印机驱动程序"
+  - 点击"下一步"
 
-## 当前版本代码结构：
 
-- main/main.c - 应用入口，系统初始化和任务管理
-- main/printer.c - USB Host 打印机管理（4台打印机支持，队列管理）
-- main/printer.h - USB 打印机模块头文件
-- main/wifi.c - WiFi 配置管理（AP/STA 模式，静态 IP）
-- main/wifi.h - WiFi 模块头文件
-- main/web_server.c - Web 服务器（RESTful API，静态文件服务）
-- main/web_server.h - Web 服务器头文件
-- main/web_resources.c - Web 资源管理（PSRAM 存储）
-- main/web_resources.h - Web 资源管理头文件
-- main/api_controller.c - API 控制器（WiFi 扫描、配置、OTA）
-- main/api_controller.h - API 控制器头文件
-- main/tcp_server.c - TCP 打印服务器（9100-9103 端口）
-- main/tcp_server.h - TCP 服务器头文件
-- main/web_hook.c - WebHook 通知系统（SMTP、企业微信、自定义）
-- main/web_hook.h - WebHook 模块头文件
-- main/monitor.c - 系统监控模块（网站监控、通知触发）
-- main/monitor.h - 监控模块头文件
-- main/config.c - 配置管理（NVS 读写）
-- main/config.h - 配置管理头文件
-- main/nvs_manager.c - NVS 管理器（打印机绑定、备注）
-- main/nvs_manager.h - NVS 管理器头文件
-- main/ntp_client.c - NTP 客户端（多服务器采样滤波）
-- main/ntp_client.h - NTP 客户端头文件
-- main/ntp_server.c - NTP 服务器（UDP 123）
-- main/ntp_server.h - NTP 服务器头文件
-- main/ntp_storage.c - NTP 存储（PSRAM 持久化）
-- main/ntp_storage.h - NTP 存储头文件
-- main/hardware_timer.c - 硬件定时器（高精度时间保持）
-- main/hardware_timer.h - 硬件定时器头文件
-- main/led.c - LED 控制（状态指示）
-- main/led.h - LED 控制头文件
-- main/sensors.c - 传感器管理（占位实现）
-- main/sensors.h - 传感器管理头文件
-- main/include/ - 公共头文件目录
-- main/web/ - Web 前端资源（HTML/CSS/JS）
 
-补充记录：
-- 本次代码质量检测综合评分 89/100，达到良好水平
-- 修复了 4 个安全和可维护性问题
-- 所有修改已通过 ESP-IDF v5.5.3 完整编译验证
-- 代码遵循 ESP-IDF 编码规范，内存管理规范
 
+（如果有）步骤 6：配置端口协议
+  - 在"其他信息"页面，协议选择"Raw"
+  - 端口号：输入 9100
+  - 点击"下一步"
+
+或者**提示 检测TCP/IP端口 没有找到 需要额外端口信息**
+  - 设备类型:
+标准(S)
+Generic Network Card
+  - 下一步:
+  - 从磁盘安装
+
+
+步骤 7：安装打印机驱动
+  - 方式A：从列表选择打印机厂商和型号
+  - 方式B：点击"从磁盘安装"，选择已下载的打印机驱动.inf文件
+  - 点击"下一步"
+
+步骤 8：完成配置
+  - 输入打印机名称（如"ESP32-Printer"）
+  - ✅ 勾选"打印测试页"验证
+  - 点击"完成"
