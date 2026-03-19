@@ -6,6 +6,7 @@
 
 #include "wifi.h"
 #include "config.h"
+#include "ntp_client.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -26,6 +27,26 @@ static EventGroupHandle_t s_wifi_event_group;
 // 重试次数
 static int s_retry_num = 0;
 #define MAX_RETRY 5
+
+/**
+ * @brief WiFi 连接后 NTP 校时任务 - 等待几秒后执行一次 NTP 校时
+ * @param pvParameters 任务参数
+ */
+static void wifi_ntp_sync_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "WiFi connected, waiting 3 seconds before NTP sync...");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    
+    ESP_LOGI(TAG, "Starting initial NTP sync...");
+    esp_err_t err = ntp_client_sync_time();
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Initial NTP sync successful");
+    } else {
+        ESP_LOGW(TAG, "Initial NTP sync failed: %s", esp_err_to_name(err));
+    }
+    
+    vTaskDelete(NULL);
+}
 
 /**
  * @brief WiFi 事件处理函数 - 处理 WiFi 连接、断开等事件
@@ -54,6 +75,12 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id
         ESP_LOGI(TAG, "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        
+        // 创建任务执行一次 NTP 校时
+        BaseType_t ret = xTaskCreate(wifi_ntp_sync_task, "wifi_ntp_sync", 4096, NULL, 5, NULL);
+        if (ret != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create WiFi NTP sync task");
+        }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
         ESP_LOGI(TAG, "Station "MACSTR" joined, AID=%d", MAC2STR(event->mac), event->aid);
@@ -264,6 +291,10 @@ esp_err_t wifi_save_config(const wifi_config_t_custom* config)
  */
 esp_err_t wifi_get_status(wifi_status_t* status)
 {
+    if (status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
     wifi_mode_t mode;
     esp_err_t err = esp_wifi_get_mode(&mode);
     if (err != ESP_OK) {
@@ -278,7 +309,7 @@ esp_err_t wifi_get_status(wifi_status_t* status)
         if (err == ESP_OK) {
             status->is_connected = true;
             status->rssi = ap_info.rssi;
-            strcpy(status->ssid, (char*)ap_info.ssid);
+            strlcpy(status->ssid, (char*)ap_info.ssid, sizeof(status->ssid));
 
             // 获取 IP 地址
             esp_netif_ip_info_t ip_info;
@@ -291,8 +322,8 @@ esp_err_t wifi_get_status(wifi_status_t* status)
         }
     } else if (mode == WIFI_MODE_AP) {
         status->is_connected = true;
-        strcpy(status->ip_address, "192.168.1.1");
-        strcpy(status->ssid, "AP_MODE");
+        strlcpy(status->ip_address, "192.168.4.1", sizeof(status->ip_address));
+        strlcpy(status->ssid, "AP_MODE", sizeof(status->ssid));
     }
 
     return ESP_OK;
@@ -337,7 +368,7 @@ esp_err_t wifi_auto_start(void)
         char device_name[64];
         err = config_load_device_name(device_name, sizeof(device_name));
         if (err != ESP_OK) {
-            strcpy(device_name, "ESP32-S3_Printer");
+            strlcpy(device_name, "ESP32-S3_Printer", sizeof(device_name));
         }
 
         ESP_LOGI(TAG, "Starting WiFi AP mode");

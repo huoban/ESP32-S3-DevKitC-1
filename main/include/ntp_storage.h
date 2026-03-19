@@ -25,6 +25,11 @@ void ntp_storage_save_sync_time(time_t timestamp);
  */
 time_t ntp_storage_get_sync_time(void);
 
+/**
+ * @brief 反初始化 NTP 存储（释放 PSRAM 内存）
+ */
+void ntp_storage_deinit(void);
+
 #ifdef __cplusplus
 }
 #endif

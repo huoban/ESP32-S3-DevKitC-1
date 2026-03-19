@@ -6,6 +6,8 @@
 #include "esp_log.h"
 #include "wifi.h"  // 包含 WiFi 相关定义
 #include "config.h" // 包含配置结构定义
+#include "web_hook.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +15,7 @@
 #define TAG "API"
 #define MAX_JSON_SIZE 256
 
+// 绑定打印机API处理 - 接收JSON请求，绑定打印机序列号到指定端口
 esp_err_t bind_printer_api_handler(httpd_req_t *req) {
     char buf[MAX_JSON_SIZE + 1];
     int ret = httpd_req_recv(req, buf, MAX_JSON_SIZE);
@@ -79,6 +82,7 @@ esp_err_t bind_printer_api_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// 解绑打印机API处理 - 接收JSON请求，移除打印机绑定关系
 esp_err_t unbind_printer_api_handler(httpd_req_t *req) {
     char buf[MAX_JSON_SIZE + 1];
     int ret = httpd_req_recv(req, buf, MAX_JSON_SIZE);
@@ -114,6 +118,7 @@ esp_err_t unbind_printer_api_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// 获取绑定列表API处理 - 返回所有已绑定打印机的列表
 esp_err_t get_bindings_api_handler(httpd_req_t *req) {
     cJSON *root = cJSON_CreateObject();
     cJSON *bindings = cJSON_CreateArray();
@@ -137,11 +142,15 @@ esp_err_t get_bindings_api_handler(httpd_req_t *req) {
     cJSON_AddItemToObject(root, "bindings", bindings);
     
     char *json_str = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, strlen(json_str));
+    if (json_str != NULL) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json_str, strlen(json_str));
+        cJSON_free(json_str);
+    } else {
+        httpd_resp_send_500(req);
+    }
     
     cJSON_Delete(root);
-    free(json_str);
     
     return ESP_OK;
 }
@@ -179,8 +188,8 @@ esp_err_t wifi_scan_api_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_str, strlen(json_str));
     
+    cJSON_free(json_str);
     cJSON_Delete(root);
-    free(json_str);
     
     return ESP_OK;
 }
@@ -270,8 +279,8 @@ esp_err_t save_wifi_config_api_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_str, strlen(json_str));
     
+    cJSON_free(json_str);
     cJSON_Delete(root);
-    free(json_str);
     
     // 延迟重启，让响应发送完成
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -306,4 +315,122 @@ void url_decode(const char *src, char *dest, size_t max_len) {
         }
     }
     dest[j] = '\0';
+}
+
+/**
+ * @brief WebHook 通用钩子接口 - 接收 title 和 content 并依次发送到所有启用的通知方式
+ */
+// WebHook通用钩子API处理 - 接收JSON请求，发送通知到所有启用的通知方式
+esp_err_t webhook_hook_api_handler(httpd_req_t *req) {
+    char buf[2048];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data received");
+        return ESP_FAIL;
+    }
+    
+    buf[ret] = '\0';
+    
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+    
+    cJSON *title_obj = cJSON_GetObjectItem(root, "title");
+    cJSON *content_obj = cJSON_GetObjectItem(root, "content");
+    const char *title = (title_obj && cJSON_IsString(title_obj)) ? title_obj->valuestring : "";
+    const char *content = (content_obj && cJSON_IsString(content_obj)) ? content_obj->valuestring : "";
+    
+    ESP_LOGI(TAG, "WebHook hook: title=%s, content=%s", title, content);
+    
+    cJSON_Delete(root);
+    
+    cJSON *resp_root = cJSON_CreateObject();
+    
+    // 使用异步任务发送，避免阻塞 HTTP 响应
+    esp_err_t err = web_hook_start_send_task(title, content);
+    if (err == ESP_OK) {
+        cJSON_AddBoolToObject(resp_root, "success", true);
+        cJSON_AddStringToObject(resp_root, "message", "Notification task started");
+        ESP_LOGI(TAG, "WebHook notification task started");
+    } else {
+        cJSON_AddBoolToObject(resp_root, "success", false);
+        cJSON_AddStringToObject(resp_root, "message", "Failed to start notification task");
+        ESP_LOGE(TAG, "Failed to start WebHook notification task: %s", esp_err_to_name(err));
+    }
+    
+    char *json_str = cJSON_PrintUnformatted(resp_root);
+    if (json_str != NULL) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json_str, strlen(json_str));
+        cJSON_free(json_str);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    
+    cJSON_Delete(resp_root);
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief 获取 WebHook 配置 API - GET /api/config/webhook
+ */
+// 获取WebHook配置API处理 - 返回当前WebHook配置
+esp_err_t get_webhook_config_api_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Getting WebHook config...");
+    
+    webhook_config_t config = {0};
+    esp_err_t err = config_load_webhook(&config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load webhook config: %s", esp_err_to_name(err));
+    }
+    
+    cJSON *root = cJSON_CreateObject();
+    
+    // SMTP 配置
+    cJSON *smtp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(smtp, "enabled", config.smtp.enabled);
+    cJSON_AddStringToObject(smtp, "smtp_server", config.smtp.smtp_server);
+    cJSON_AddNumberToObject(smtp, "smtp_port", config.smtp.smtp_port);
+    cJSON_AddStringToObject(smtp, "username", config.smtp.username);
+    cJSON_AddStringToObject(smtp, "password", config.smtp.password);
+    cJSON_AddStringToObject(smtp, "from_email", config.smtp.from_email);
+    cJSON_AddStringToObject(smtp, "to_email", config.smtp.to_email);
+    cJSON_AddItemToObject(root, "smtp", smtp);
+    
+    // 企业微信配置
+    cJSON *wechat = cJSON_CreateObject();
+    cJSON_AddBoolToObject(wechat, "enabled", config.wechat.enabled);
+    cJSON_AddStringToObject(wechat, "corpid", config.wechat.corpid);
+    cJSON_AddStringToObject(wechat, "corpsecret", config.wechat.corpsecret);
+    cJSON_AddStringToObject(wechat, "agentid", config.wechat.agentid);
+    cJSON_AddStringToObject(wechat, "touser", config.wechat.touser);
+    cJSON_AddItemToObject(root, "wechat", wechat);
+    
+    // 自定义 WebHook 配置
+    cJSON *custom = cJSON_CreateObject();
+    cJSON_AddBoolToObject(custom, "enabled", config.custom.enabled);
+    cJSON_AddStringToObject(custom, "url", config.custom.url);
+    cJSON_AddStringToObject(custom, "method", config.custom.method);
+    cJSON_AddStringToObject(custom, "content_type", config.custom.content_type);
+    cJSON_AddStringToObject(custom, "body_template", config.custom.body_template);
+    cJSON_AddItemToObject(root, "custom", custom);
+    
+    cJSON_AddBoolToObject(root, "success", true);
+    
+    char *json_str = cJSON_PrintUnformatted(root);
+    if (json_str != NULL) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json_str, strlen(json_str));
+        cJSON_free(json_str);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    
+    cJSON_Delete(root);
+    
+    return ESP_OK;
 }

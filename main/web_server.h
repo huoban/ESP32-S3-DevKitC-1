@@ -103,6 +103,13 @@ esp_err_t web_server_handle_post_config_monitor(httpd_req_t* req);
 esp_err_t web_server_handle_post_config_wechat(httpd_req_t* req);
 
 /**
+ * @brief 处理 POST /api/config/webhook 请求 - 保存完整的通知配置（SMTP + 企业微信 + 自定义 WebHook）
+ * @param req HTTP 请求对象
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t web_server_handle_post_config_webhook(httpd_req_t* req);
+
+/**
  * @brief 处理 POST /api/system/reset 请求
  * @param req HTTP 请求对象
  * @return ESP_OK 成功，其他值失败
@@ -122,6 +129,41 @@ esp_err_t web_server_handle_post_reboot(httpd_req_t* req);
  * @return ESP_OK 成功，其他值失败
  */
 esp_err_t web_server_handle_post_monitor_test(httpd_req_t* req);
+
+/**
+ * @brief 处理 POST /api/webhook/hook 请求 - 通用 WebHook 钩子接口
+ * @param req HTTP 请求对象
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t web_server_handle_webhook_hook(httpd_req_t* req);
+
+/**
+ * @brief 处理 POST /api/webhook/test/smtp 请求 - 测试 SMTP 配置
+ * @param req HTTP 请求对象
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t web_server_handle_webhook_test_smtp(httpd_req_t* req);
+
+/**
+ * @brief 处理 POST /api/webhook/test/wechat 请求 - 测试企业微信配置
+ * @param req HTTP 请求对象
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t web_server_handle_webhook_test_wechat(httpd_req_t* req);
+
+/**
+ * @brief 处理 POST /api/webhook/test/custom 请求 - 测试自定义 WebHook 配置
+ * @param req HTTP 请求对象
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t web_server_handle_webhook_test_custom(httpd_req_t* req);
+
+/**
+ * @brief 处理 POST /api/webhook/test/all 请求 - 测试所有启用的 WebHook 通知方式
+ * @param req HTTP 请求对象
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t web_server_handle_webhook_test_all(httpd_req_t* req);
 
 /**
  * @brief 发送 JSON 响应

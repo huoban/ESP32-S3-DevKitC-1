@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -14,6 +15,8 @@
 #include "driver/gpio.h"
 #include "driver/temperature_sensor.h"
 #include "temp_sensor.h"
+#include "esp_heap_caps.h"
+#include "mbedtls/platform.h"
 
 #include "config.h"
 #include "wifi.h"
@@ -27,11 +30,40 @@
 #include "hardware_timer.h"
 #include "monitor.h"
 #include "web_resources.h"
+#include "web_hook.h"
 #include "esp_timer.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 
 static const char *TAG = "MAIN";
+
+// ==================== mbedTLS 自定义内存分配器 ====================
+// mbedTLS calloc - 使用 PSRAM 分配内存
+static void *mbedtls_psram_calloc(size_t n, size_t size)
+{
+    size_t total_size = n * size;
+    void *ptr = heap_caps_malloc(total_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ptr != NULL) {
+        memset(ptr, 0, total_size);
+    }
+    return ptr;
+}
+
+// mbedTLS free - 使用 PSRAM 释放内存
+static void mbedtls_psram_free(void *ptr)
+{
+    if (ptr != NULL) {
+        heap_caps_free(ptr);
+    }
+}
+
+// 初始化 mbedTLS 内存分配器
+static void mbedtls_init_psram_allocator(void)
+{
+    ESP_LOGI(TAG, "Initializing mbedTLS with PSRAM allocator...");
+    mbedtls_platform_set_calloc_free(mbedtls_psram_calloc, mbedtls_psram_free);
+    ESP_LOGI(TAG, "mbedTLS PSRAM allocator initialized");
+}
 
 // 系统运行时间（秒）
 static uint32_t Global_Uptime = 0;
@@ -96,6 +128,8 @@ static void boot_button_monitor_task(void *pvParameters)
                 } else if (elapsed_ms % 1000 == 0 && !long_press_detected) {
                     // 每秒输出一次进度
                     ESP_LOGI(TAG, "Boot button pressed: %d/%d seconds", elapsed_ms / 1000, BOOT_BUTTON_LONG_PRESS_MS / 1000);
+                    // 添加小延迟避免日志过于频繁
+                    vTaskDelay(pdMS_TO_TICKS(10));
                 }
             }
         } else {
@@ -147,12 +181,23 @@ static void system_monitor_task(void *pvParameters)
     ESP_LOGI(TAG, "System monitor task started");
 
     while (1) {
-        // 每 60 秒输出一次系统状态
-        vTaskDelay(pdMS_TO_TICKS(60000));
+        // 每 2 秒检查一次是否有打印任务在忙碌
+        vTaskDelay(pdMS_TO_TICKS(2000));
 
-        ESP_LOGI(TAG, "System uptime: %lu seconds", Global_Uptime);
-        ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
-        ESP_LOGI(TAG, "Temperature: %.1f C", get_system_temperature());
+        // 检查是否有打印机正在忙碌
+        if (printer_any_busy()) {
+            ESP_LOGI(TAG, "Printer is busy, skipping monitor tasks...");
+            continue;
+        }
+
+        // 每 60 秒输出一次系统状态
+        static uint32_t last_log_time = 0;
+        if (Global_Uptime - last_log_time >= 60) {
+            ESP_LOGI(TAG, "System uptime: %lu seconds", Global_Uptime);
+            ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
+            ESP_LOGI(TAG, "Temperature: %.1f C", get_system_temperature());
+            last_log_time = Global_Uptime;
+        }
     }
 }
 
@@ -161,6 +206,9 @@ static void system_monitor_task(void *pvParameters)
  */
 void app_main(void)
 {
+    // 首先初始化 mbedTLS 内存分配器（必须在所有 mbedTLS 操作之前）
+    mbedtls_init_psram_allocator();
+
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "ESP32-S3 Print Server v1.0");
     ESP_LOGI(TAG, "========================================");
@@ -240,10 +288,18 @@ void app_main(void)
         temp_sensor = NULL;
     }
     
+    // 初始化网站监控模块（必须在 Web 服务器启动前初始化）
+    ESP_LOGI(TAG, "Initializing monitor module...");
+    ESP_ERROR_CHECK(monitor_init());
+    
     // 初始化 Web 服务器
     ESP_LOGI(TAG, "Initializing Web server...");
     ESP_ERROR_CHECK(web_server_init());
     ESP_ERROR_CHECK(web_server_start());
+
+    // 初始化 WebHook 模块
+    ESP_LOGI(TAG, "Initializing WebHook module...");
+    ESP_ERROR_CHECK(web_hook_init());
 
     // 初始化 USB 打印机管理
     ESP_LOGI(TAG, "Initializing printer module...");
@@ -278,29 +334,40 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing NTP server...");
     ESP_ERROR_CHECK(ntp_server_init());
     ESP_ERROR_CHECK(ntp_server_start());
+    
+    // 根据系统配置决定是否启动监控
+    monitor_system_config_t sys_config;
+    monitor_get_system_config(&sys_config);
+    if (sys_config.global_enabled) {
+        ESP_LOGI(TAG, "Starting monitor (enabled in config)");
+        ESP_ERROR_CHECK(monitor_start());
+    } else {
+        ESP_LOGI(TAG, "Monitor is disabled in config, not starting");
+    }
 
-    // 初始化网站监控模块
-    ESP_LOGI(TAG, "Initializing monitor module...");
-    ESP_ERROR_CHECK(monitor_init());
-    ESP_ERROR_CHECK(monitor_start());
-
-    // 创建运行时间定时器
+    // 创建系统运行时间定时器（保存句柄以便后续清理）
     ESP_LOGI(TAG, "Creating uptime timer...");
+    static esp_timer_handle_t uptime_timer = NULL;
     const esp_timer_create_args_t uptime_timer_args = {
         .callback = &uptime_timer_callback,
         .name = "uptime_timer"
     };
-    esp_timer_handle_t uptime_timer;
     ESP_ERROR_CHECK(esp_timer_create(&uptime_timer_args, &uptime_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(uptime_timer, 1000000)); // 1 秒
 
-    // 创建系统监控任务
+    // 创建系统监控任务（检查返回值）
     ESP_LOGI(TAG, "Creating system monitor task...");
-    xTaskCreate(system_monitor_task, "system_monitor", 4096, NULL, 5, NULL);
+    BaseType_t ret = xTaskCreate(system_monitor_task, "system_monitor", 4096, NULL, 5, NULL);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create system monitor task");
+    }
 
-    // 创建Boot按钮检测任务
+    // 创建 Boot 按钮检测任务（检查返回值）
     ESP_LOGI(TAG, "Creating boot button monitor task...");
-    xTaskCreate(boot_button_monitor_task, "boot_button_monitor", 4096, NULL, 5, NULL);
+    ret = xTaskCreate(boot_button_monitor_task, "boot_button_monitor", 4096, NULL, 5, NULL);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create boot button monitor task");
+    }
 
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "System started successfully!");

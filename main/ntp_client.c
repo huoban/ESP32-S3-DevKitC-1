@@ -134,21 +134,30 @@ static bool ntp_get_precise_time(uint32_t *best_sec, uint32_t *best_us)
 
     qsort(offsets, ok_count, sizeof(int64_t), compare_int64);
     
+    // 选择中位数偏移对应的样本
     int mid_index = ok_count / 2;
     int64_t best_offset = offsets[mid_index];
     
+    // 找到最接近中位数偏移的样本
+    int best_index = 0;
+    int64_t min_diff = INT64_MAX;
     for (int i = 0; i < ok_count; i++) {
         uint64_t sample_us = (uint64_t)times[i][0] * 1000000 + times[i][1];
         uint64_t current_us = hardware_timer_get_us();
         int64_t sample_offset = (int64_t)sample_us - (int64_t)current_us;
         
-        if (sample_offset == best_offset || (sample_offset - best_offset >= -1000 && sample_offset - best_offset <= 1000)) {
-            *best_sec = times[i][0];
-            *best_us = times[i][1];
-            ESP_LOGI(TAG, "Selected sample %d: %lu.%06lu", i, *best_sec, *best_us);
-            break;
+        int64_t diff = sample_offset - best_offset;
+        if (diff < 0) diff = -diff;
+        
+        if (diff < min_diff) {
+            min_diff = diff;
+            best_index = i;
         }
     }
+    
+    *best_sec = times[best_index][0];
+    *best_us = times[best_index][1];
+    ESP_LOGI(TAG, "Selected sample %d: %lu.%06lu (offset=%lld)", best_index, *best_sec, *best_us, best_offset);
 
     return true;
 }

@@ -12,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -47,7 +48,7 @@ static void tcp_client_handle_task(void *arg)
     int client_sock = args->client_sock;
     
     // 释放动态分配的参数结构
-    free(args);
+    heap_caps_free(args);
     
     ESP_LOGI(TAG, "Client task started with socket %d on port %d", 
              client_sock, printer_server->port);
@@ -91,7 +92,10 @@ static void tcp_client_handle_task(void *arg)
         struct timeval timeout;
         timeout.tv_sec = 0;
         timeout.tv_usec = 100000; // 100ms
-        setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        int ret_sockopt = setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        if (ret_sockopt != 0) {
+            ESP_LOGW(TAG, "Failed to set SO_RCVTIMEO: errno=%d", errno);
+        }
 
         int bytes_read = recv(client_sock, buffer, sizeof(buffer), 0);
         if (bytes_read < 0) {
@@ -112,14 +116,14 @@ static void tcp_client_handle_task(void *arg)
         ESP_LOGI(TAG, "Received %d bytes from client for port %d (total: %d)", 
                  bytes_read, printer_server->port, total_bytes);
 
-        // 转发数据到目标打印机
+        // 转发数据到目标打印机队列
         if (target_printer_instance >= 0) {
-            esp_err_t err = printer_send_data(target_printer_instance, buffer, bytes_read, 30000);
+            esp_err_t err = printer_enqueue_data(target_printer_instance, buffer, bytes_read, 5000);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to send data to printer %d: %s", 
+                ESP_LOGE(TAG, "Failed to enqueue data to printer %d: %s", 
                          target_printer_instance, esp_err_to_name(err));
             } else {
-                ESP_LOGI(TAG, "Data sent to printer %d (serial %s)", target_printer_instance, target_serial);
+                ESP_LOGI(TAG, "Data enqueued to printer %d (serial %s)", target_printer_instance, target_serial);
             }
         } else {
             ESP_LOGE(TAG, "No target printer available for port %d", printer_server->port);
@@ -206,8 +210,8 @@ static void printer_tcp_server_task(void *arg)
                  inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port),
                  printer_server->printer_instance, printer_server->port);
 
-        // 创建客户端处理任务，动态分配参数结构
-        client_task_args_t *args = (client_task_args_t *)malloc(sizeof(client_task_args_t));
+        // 创建客户端处理任务，动态分配参数结构（使用PSRAM）
+        client_task_args_t *args = (client_task_args_t *)heap_caps_malloc(sizeof(client_task_args_t), MALLOC_CAP_SPIRAM);
         if (!args) {
             ESP_LOGE(TAG, "Failed to allocate memory for client task args");
             close(client_sock);
@@ -219,7 +223,7 @@ static void printer_tcp_server_task(void *arg)
         BaseType_t task_ret = xTaskCreate(tcp_client_handle_task, "tcp_client_task", 16384, args, 5, NULL);
         if (task_ret != pdPASS) {
             ESP_LOGE(TAG, "Failed to create client task for printer %d", printer_server->printer_instance);
-            free(args);
+            heap_caps_free(args);
             close(client_sock);
         }
     }
@@ -262,6 +266,13 @@ esp_err_t tcp_server_start(void) {
         BaseType_t ret = xTaskCreate(printer_tcp_server_task, "tcp_server_task", 16384, &g_printer_servers[i], 6, &g_printer_servers[i].task_handle);
         if (ret != pdPASS) {
             ESP_LOGE(TAG, "Failed to create TCP server task for printer %d", i);
+            // 清理已创建的任务
+            for (int j = 0; j < i; j++) {
+                if (g_printer_servers[j].task_handle != NULL) {
+                    vTaskDelete(g_printer_servers[j].task_handle);
+                    g_printer_servers[j].task_handle = NULL;
+                }
+            }
             return ESP_ERR_NO_MEM;
         }
         vTaskDelay(pdMS_TO_TICKS(100)); // 延迟启动，避免端口冲突

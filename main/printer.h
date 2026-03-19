@@ -11,6 +11,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "usb/usb_host.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/event_groups.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +24,21 @@ extern "C" {
 #define PRINTER_MAX_COUNT 4         // 最大支持打印机数量
 #define PRINTER_BUFFER_SIZE (1024 * 1024)  // 打印机缓冲区大小 (1MB)
 #define PRINTER_TRANSFER_CHUNK_SIZE 4096    // USB传输块大小 (4KB)
+#define PRINTER_QUEUE_ITEM_SIZE 8192        // 队列项大小 (8KB)
+#define PRINTER_QUEUE_LENGTH 32              // 队列长度
+
+// ==================== 事件组位定义 ====================
+#define PRINT_BUSY_BIT_0 (1 << 0)
+#define PRINT_BUSY_BIT_1 (1 << 1)
+#define PRINT_BUSY_BIT_2 (1 << 2)
+#define PRINT_BUSY_BIT_3 (1 << 3)
+#define ALL_PRINT_BUSY_BITS (PRINT_BUSY_BIT_0 | PRINT_BUSY_BIT_1 | PRINT_BUSY_BIT_2 | PRINT_BUSY_BIT_3)
+
+// ==================== 队列数据项结构 ====================
+typedef struct {
+    uint8_t* data;
+    size_t len;
+} printer_queue_item_t;
 
 // ==================== 打印机状态枚举 ====================
 /**
@@ -208,6 +227,30 @@ void printer_on_device_disconnected(uint8_t dev_addr);
  * @return 找到的打印机实例，如果未找到返回-1
  */
 int printer_find_instance_by_serial(const char* serial_number);
+
+// ==================== 事件组和队列管理接口 ====================
+
+/**
+ * @brief 获取打印忙碌事件组句柄
+ * @return 事件组句柄
+ */
+EventGroupHandle_t printer_get_busy_event_group(void);
+
+/**
+ * @brief 向打印机队列发送数据
+ * @param instance 打印机实例 (0-3)
+ * @param data 数据指针
+ * @param len 数据长度
+ * @param timeout_ms 超时时间（毫秒）
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t printer_enqueue_data(uint8_t instance, const uint8_t* data, size_t len, uint32_t timeout_ms);
+
+/**
+ * @brief 检查是否有任何打印机正在忙碌
+ * @return true 有打印机忙碌，false 所有打印机空闲
+ */
+bool printer_any_busy(void);
 
 #ifdef __cplusplus
 }

@@ -97,11 +97,15 @@ esp_err_t led_set_state(led_state_t state)
     // 保存 LED 状态
     g_led_config.state = state;
 
-    // 如果需要闪烁，启动 LED 任务
+    // 如果需要闪烁，启动 LED 任务（检查返回值）
     if (state == LED_STATE_BLINK_SLOW || state == LED_STATE_BLINK_FAST) {
         if (g_led_task_handle == NULL) {
-            xTaskCreate(led_task, "led_task", 2048, NULL, 2, &g_led_task_handle);
-            ESP_LOGI(TAG, "LED task started");
+            BaseType_t ret = xTaskCreate(led_task, "led_task", 2048, NULL, 2, &g_led_task_handle);
+            if (ret == pdPASS) {
+                ESP_LOGI(TAG, "LED task started");
+            } else {
+                ESP_LOGE(TAG, "Failed to create LED task");
+            }
         }
     } else {
         // 关闭 LED 任务

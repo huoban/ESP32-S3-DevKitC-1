@@ -25,6 +25,7 @@ static uint32_t calculate_serial_hash(const char *serial) {
     return hash;
 }
 
+// 初始化NVS存储 - 初始化NVS Flash并处理分区损坏情况
 esp_err_t init_nvs(void) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -34,6 +35,7 @@ esp_err_t init_nvs(void) {
     return ret;
 }
 
+// 保存打印机绑定关系（带备注） - 将打印机序列号绑定到指定端口并保存备注
 esp_err_t save_binding_with_remark(const char *serial, uint16_t port, const char *remark) {
     if (!serial || *serial == '\0' || port < 1024) {
         ESP_LOGE(TAG, "Invalid argument: serial=%s, port=%d", serial ? serial : "(null)", port);
@@ -119,6 +121,7 @@ esp_err_t save_binding(const char *serial, uint16_t port) {
     return save_binding_with_remark(serial, port, NULL);
 }
 
+// 移除打印机绑定关系 - 删除指定序列号的绑定关系和备注
 esp_err_t remove_binding(const char *serial) {
     if (!serial || *serial == '\0') return ESP_ERR_INVALID_ARG;
     
@@ -182,6 +185,7 @@ esp_err_t remove_binding(const char *serial) {
     return err;
 }
 
+// 获取所有绑定关系 - 读取NVS中保存的所有打印机绑定关系
 esp_err_t get_all_bindings(printer_binding_t* bindings, size_t max_bindings, size_t* count) {
     if (!bindings || !count) {
         return ESP_ERR_INVALID_ARG;
@@ -237,6 +241,7 @@ esp_err_t get_all_bindings(printer_binding_t* bindings, size_t max_bindings, siz
     return ESP_OK;
 }
 
+// 获取绑定端口 - 根据打印机序列号查找绑定的端口号
 uint16_t get_binding_port(const char *serial) {
     if (!serial || *serial == '\0') return 0;
     

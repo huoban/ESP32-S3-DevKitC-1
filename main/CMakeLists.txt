@@ -6,6 +6,8 @@ set(EMBED_TXTFILES
     "${CMAKE_CURRENT_SOURCE_DIR}/web/wifi.html"
     "${CMAKE_CURRENT_SOURCE_DIR}/web/usb.html"
     "${CMAKE_CURRENT_SOURCE_DIR}/web/monitor.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/webhook.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/sensors.html"
     "${CMAKE_CURRENT_SOURCE_DIR}/web/css/style.css"
     "${CMAKE_CURRENT_SOURCE_DIR}/web/js/app.js"
 )
@@ -28,6 +30,8 @@ idf_component_register(
         "nvs_manager.c"
         "ntp_storage.c"
         "web_resources.c"
+        "sensors.c"
+        "web_hook.c"
     INCLUDE_DIRS
         "."
         "include"

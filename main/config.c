@@ -289,8 +289,22 @@ esp_err_t config_load_ntp(ntp_config_t* config)
         return err;
     }
 
-    // 读取配置
-    size_t required_size = sizeof(ntp_config_t);
+    // 读取配置 - 先获取实际大小
+    size_t required_size = 0;
+    err = nvs_get_blob(nvs_handle, NVS_KEY_NTP_CONFIG, NULL, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error reading NTP config size!");
+        nvs_close(nvs_handle);
+        return err;
+    }
+    
+    // 验证大小
+    if (required_size != sizeof(ntp_config_t)) {
+        ESP_LOGE(TAG, "Invalid NTP config size: %zu", required_size);
+        nvs_close(nvs_handle);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
     err = nvs_get_blob(nvs_handle, NVS_KEY_NTP_CONFIG, config, &required_size);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Error reading NTP config!");
@@ -329,6 +343,13 @@ esp_err_t config_save_monitor(const monitor_site_t* sites, size_t count)
         return err;
     }
 
+    // 检查数据大小
+    if (count > 10) {
+        ESP_LOGE(TAG, "Too many monitor sites: %zu", count);
+        nvs_close(nvs_handle);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
     // 保存网站数量
     err = nvs_set_blob(nvs_handle, NVS_KEY_MONITOR_SITES, sites, count * sizeof(monitor_site_t));
     if (err != ESP_OK) {
@@ -367,20 +388,38 @@ esp_err_t config_load_monitor(monitor_site_t* sites, size_t* count)
         return ESP_ERR_INVALID_ARG;
     }
 
+    // 先清零
+    memset(sites, 0, 10 * sizeof(monitor_site_t));
+    *count = 0;
+
     // 打开 NVS
     err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) opening NVS namespace!", esp_err_to_name(err));
-        return err;
+        ESP_LOGW(TAG, "Monitor config not found, using defaults");
+        return ESP_OK;
     }
 
-    // 读取配置
-    size_t required_size = 10 * sizeof(monitor_site_t);
+    // 读取配置 - 先获取实际大小
+    size_t required_size = 0;
+    err = nvs_get_blob(nvs_handle, NVS_KEY_MONITOR_SITES, NULL, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Monitor config not found, using defaults");
+        nvs_close(nvs_handle);
+        return ESP_OK;
+    }
+    
+    // 检查缓冲区是否足够
+    if (required_size > 10 * sizeof(monitor_site_t)) {
+        ESP_LOGW(TAG, "Monitor config too large, using defaults");
+        nvs_close(nvs_handle);
+        return ESP_OK;
+    }
+    
     err = nvs_get_blob(nvs_handle, NVS_KEY_MONITOR_SITES, sites, &required_size);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error reading monitor config!");
+        ESP_LOGW(TAG, "Monitor config not found, using defaults");
         nvs_close(nvs_handle);
-        return err;
+        return ESP_OK;
     }
 
     *count = required_size / sizeof(monitor_site_t);
@@ -452,26 +491,42 @@ esp_err_t config_load_wechat(wechat_config_t* config)
         return ESP_ERR_INVALID_ARG;
     }
 
+    // 先清零整个结构体
+    memset(config, 0, sizeof(wechat_config_t));
+
     // 打开 NVS
     err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) opening NVS namespace!", esp_err_to_name(err));
-        return err;
+        ESP_LOGW(TAG, "WeChat config not found, using defaults");
+        return ESP_OK;
     }
 
-    // 读取配置
-    size_t required_size = sizeof(wechat_config_t);
+    // 读取配置 - 先获取实际大小
+    size_t required_size = 0;
+    err = nvs_get_blob(nvs_handle, NVS_KEY_WECHAT_CONFIG, NULL, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "WeChat config not found, using defaults");
+        nvs_close(nvs_handle);
+        return ESP_OK;
+    }
+    
+    // 验证大小
+    if (required_size != sizeof(wechat_config_t)) {
+        ESP_LOGW(TAG, "Invalid wechat config size: %zu, using defaults", required_size);
+        nvs_close(nvs_handle);
+        return ESP_OK;
+    }
+    
     err = nvs_get_blob(nvs_handle, NVS_KEY_WECHAT_CONFIG, config, &required_size);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error reading wechat config!");
+        ESP_LOGW(TAG, "WeChat config not found, using defaults");
         nvs_close(nvs_handle);
-        return err;
+        return ESP_OK;
     }
 
     nvs_close(nvs_handle);
 
     ESP_LOGI(TAG, "WeChat config loaded");
-
     return ESP_OK;
 }
 
@@ -624,5 +679,220 @@ esp_err_t config_load_device_name(char* name, size_t len)
 
     nvs_close(nvs_handle);
 
+    return ESP_OK;
+}
+
+/**
+ * @brief 保存 WebHook 配置 - 将 WebHook 配置保存到 NVS
+ * @param config WebHook 配置指针
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t config_save_webhook(const webhook_config_t* config)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err;
+
+    if (config == NULL) {
+        ESP_LOGE(TAG, "Invalid argument: config is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS namespace!", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_blob(nvs_handle, NVS_KEY_WEBHOOK_CONFIG, config, sizeof(webhook_config_t));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error saving webhook config!");
+        nvs_close(nvs_handle);
+        return err;
+    }
+
+    err = nvs_commit(nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error committing NVS changes!");
+    }
+
+    nvs_close(nvs_handle);
+
+    ESP_LOGI(TAG, "Webhook config saved");
+    return err;
+}
+
+/**
+ * @brief 加载 WebHook 配置 - 从 NVS 读取 WebHook 配置
+ * @param config WebHook 配置指针
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t config_load_webhook(webhook_config_t* config)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err;
+
+    if (config == NULL) {
+        ESP_LOGE(TAG, "Invalid argument: config is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // 先清零整个结构体
+    memset(config, 0, sizeof(webhook_config_t));
+    
+    err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Webhook config not found, using defaults");
+        // 设置默认值
+        strlcpy(config->custom.method, "POST", sizeof(config->custom.method));
+        strlcpy(config->custom.content_type, "application/json", sizeof(config->custom.content_type));
+        strlcpy(config->custom.body_template, "{\"title\":\"\",\"content\":\"\"}", sizeof(config->custom.body_template));
+        return ESP_OK;
+    }
+
+    // 读取配置 - 先获取实际大小
+    size_t required_size = 0;
+    err = nvs_get_blob(nvs_handle, NVS_KEY_WEBHOOK_CONFIG, NULL, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Webhook config not found, using defaults");
+        nvs_close(nvs_handle);
+        // 设置默认值
+        strlcpy(config->custom.method, "POST", sizeof(config->custom.method));
+        strlcpy(config->custom.content_type, "application/json", sizeof(config->custom.content_type));
+        strlcpy(config->custom.body_template, "{\"title\":\"\",\"content\":\"\"}", sizeof(config->custom.body_template));
+        return ESP_OK;
+    }
+    
+    // 验证大小
+    if (required_size != sizeof(webhook_config_t)) {
+        ESP_LOGW(TAG, "Invalid webhook config size: %zu, using defaults", required_size);
+        nvs_close(nvs_handle);
+        // 设置默认值
+        strlcpy(config->custom.method, "POST", sizeof(config->custom.method));
+        strlcpy(config->custom.content_type, "application/json", sizeof(config->custom.content_type));
+        strlcpy(config->custom.body_template, "{\"title\":\"\",\"content\":\"\"}", sizeof(config->custom.body_template));
+        return ESP_OK;
+    }
+    
+    err = nvs_get_blob(nvs_handle, NVS_KEY_WEBHOOK_CONFIG, config, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Webhook config not found, using defaults");
+        nvs_close(nvs_handle);
+        // 设置默认值
+        strlcpy(config->custom.method, "POST", sizeof(config->custom.method));
+        strlcpy(config->custom.content_type, "application/json", sizeof(config->custom.content_type));
+        strlcpy(config->custom.body_template, "{\"title\":\"\",\"content\":\"\"}", sizeof(config->custom.body_template));
+        return ESP_OK;
+    }
+
+    nvs_close(nvs_handle);
+
+    ESP_LOGI(TAG, "Webhook config loaded");
+    return ESP_OK;
+}
+
+/**
+ * @brief 保存系统监控配置 - 将系统监控配置保存到 NVS
+ * @param config 系统监控配置指针
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t config_save_monitor_system(const monitor_system_config_t* config)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err;
+
+    if (config == NULL) {
+        ESP_LOGE(TAG, "Invalid argument: config is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS namespace!", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_blob(nvs_handle, NVS_KEY_MONITOR_SYSTEM, config, sizeof(monitor_system_config_t));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error saving monitor system config!");
+        nvs_close(nvs_handle);
+        return err;
+    }
+
+    err = nvs_commit(nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error committing NVS changes!");
+    }
+
+    nvs_close(nvs_handle);
+    ESP_LOGI(TAG, "Monitor system config saved");
+    return err;
+}
+
+/**
+ * @brief 加载系统监控配置 - 从 NVS 读取系统监控配置
+ * @param config 系统监控配置指针
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t config_load_monitor_system(monitor_system_config_t* config)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err;
+
+    if (config == NULL) {
+        ESP_LOGE(TAG, "Invalid argument: config is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(config, 0, sizeof(monitor_system_config_t));
+    
+    err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Monitor system config not found, using defaults");
+        config->global_check_interval = 3;
+        config->global_notify_interval = 20;
+        config->global_timeout = 3;
+        config->global_offline_count = 5;
+        config->global_enabled = true;
+        return ESP_OK;
+    }
+
+    size_t required_size = 0;
+    err = nvs_get_blob(nvs_handle, NVS_KEY_MONITOR_SYSTEM, NULL, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Monitor system config not found, using defaults");
+        config->global_check_interval = 3;
+        config->global_notify_interval = 20;
+        config->global_timeout = 3;
+        config->global_offline_count = 5;
+        config->global_enabled = true;
+        nvs_close(nvs_handle);
+        return ESP_OK;
+    }
+    
+    if (required_size != sizeof(monitor_system_config_t)) {
+        ESP_LOGW(TAG, "Invalid monitor system config size, using defaults");
+        config->global_check_interval = 3;
+        config->global_notify_interval = 20;
+        config->global_timeout = 3;
+        config->global_offline_count = 5;
+        config->global_enabled = true;
+        nvs_close(nvs_handle);
+        return ESP_OK;
+    }
+    
+    err = nvs_get_blob(nvs_handle, NVS_KEY_MONITOR_SYSTEM, config, &required_size);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Monitor system config not found, using defaults");
+        config->global_check_interval = 3;
+        config->global_notify_interval = 20;
+        config->global_timeout = 3;
+        config->global_offline_count = 5;
+        config->global_enabled = true;
+        nvs_close(nvs_handle);
+        return ESP_OK;
+    }
+
+    nvs_close(nvs_handle);
+    ESP_LOGI(TAG, "Monitor system config loaded");
     return ESP_OK;
 }

@@ -13,12 +13,22 @@ void ntp_storage_init(void)
     s_ntp_sync_time = heap_caps_malloc(sizeof(time_t), MALLOC_CAP_SPIRAM);
     if (s_ntp_sync_time == NULL) {
         ESP_LOGE(TAG, "Failed to allocate PSRAM for NTP storage");
+        // 设置错误状态，后续操作会失败但不会崩溃
         return;
     }
     
     // 初始化为 0（表示从未同步）
     *s_ntp_sync_time = 0;
     ESP_LOGI(TAG, "NTP storage initialized in PSRAM");
+}
+
+void ntp_storage_deinit(void)
+{
+    if (s_ntp_sync_time != NULL) {
+        heap_caps_free(s_ntp_sync_time);
+        s_ntp_sync_time = NULL;
+        ESP_LOGI(TAG, "NTP storage deinitialized");
+    }
 }
 
 void ntp_storage_save_sync_time(time_t timestamp)

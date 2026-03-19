@@ -1,6 +1,8 @@
 build/
 .cache/
 .trae/
+README.md
+*.md
 sdkconfig.old
 *.pyc
 __pycache__/
@@ -11,3 +13,4 @@ __pycache__/
 *.swp
 *.swo
 *~
+.gitnexus

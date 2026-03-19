@@ -5,198 +5,354 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>网站监控 - ESP32-S3 打印服务器</title>
     <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .table-container {
+            overflow-x: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        /* 取消表格行悬停背景色 */
+        /* tr:hover {
+            background: #f8f9fa;
+        } */
+        
+        .status-online {
+            color: #28a745;
+            font-weight: 600;
+            background: none !important;
+        }
+        
+        .status-offline {
+            color: #dc3545;
+            font-weight: 600;
+            background: none !important;
+        }
+        
+        .status-paused {
+            color: #ffc107;
+            font-weight: 600;
+            background: none !important;
+        }
+        
+        .status-unknown {
+            color: #6c757d;
+            background: none !important;
+        }
+        
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 12px;
+            margin-right: 4px;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .card-section {
+            margin-bottom: 20px;
+        }
+        
+        .card-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .card-section-header h2 {
+            margin: 0;
+            border: none;
+            padding: 0;
+        }
+        
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        
+        .status-badge.running {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-badge.stopped {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .footer-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        
+        .footer-info span {
+            color: #6c757d;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+        }
+        
+        .close-btn {
+            font-size: 28px;
+            font-weight: bold;
+            color: #aaa;
+            cursor: pointer;
+            background: none;
+            border: none;
+        }
+        
+        .close-btn:hover {
+            color: #000;
+        }
+        
+        @media (max-width: 768px) {
+            table {
+                font-size: 12px;
+            }
+            
+            th, td {
+                padding: 8px 4px;
+            }
+            
+            .btn-small {
+                padding: 2px 4px;
+                font-size: 10px;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>网站监控</h1>
-            <a href="/index.html" class="back-link">← 返回首页</a>
+            <div>
+                <h1>📊 网站监控</h1>
+                <p class="subtitle">监控网站可用性状态</p>
+            </div>
+            <a href="/" class="btn btn-secondary">← 返回首页</a>
         </header>
 
-        <!-- 监控网站列表 -->
+        <!-- 监控列表 -->
         <div class="card">
-            <h2>监控网站列表</h2>
-            <div id="sites" class="sites">
-                <!-- 网站列表将在这里动态生成 -->
+            <div class="card-section-header">
+                <h2>监控列表</h2>
+                <button onclick="openAddModal()" class="btn btn-primary">➕ 添加监控</button>
             </div>
-            <button onclick="addSite()" class="btn btn-primary">添加网站</button>
+            
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>网址</th>
+                            <th>状态</th>
+                            <th>通知时间</th>
+                            <th>Host</th>
+                            <th>离线次数</th>
+                            <th>健康码</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sitesTableBody">
+                        <tr>
+                            <td colspan="8" style="text-align:center;color:#999;">暂无监控网站</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
-        <!-- 企业微信配置 -->
+        <!-- 系统参数 -->
         <div class="card">
-            <h2>企业微信配置</h2>
-            <form id="wechatForm" onsubmit="saveWechatConfig(event)">
+            <div class="card-section-header">
+                <h2>系统参数</h2>
+            </div>
+            
+            <div class="config-grid">
                 <div class="form-group">
-                    <label for="corpid">企业 ID (corpid):</label>
-                    <input type="text" id="corpid" name="corpid" placeholder="输入企业 ID">
+                    <label for="checkInterval">检测间隔(分钟)</label>
+                    <input type="number" id="checkInterval" min="1" max="1440" value="3">
                 </div>
                 <div class="form-group">
-                    <label for="corpsecret">应用密钥 (corpsecret):</label>
-                    <input type="text" id="corpsecret" name="corpsecret" placeholder="输入应用密钥">
+                    <label for="notifyInterval">通知间隔(分钟)</label>
+                    <input type="number" id="notifyInterval" min="1" max="1440" value="20">
                 </div>
                 <div class="form-group">
-                    <label for="agentid">应用 ID (agentid):</label>
-                    <input type="text" id="agentid" name="agentid" placeholder="输入应用 ID">
+                    <label for="timeout">HTTP/S超时(秒)</label>
+                    <input type="number" id="timeout" min="1" max="60" value="3">
                 </div>
                 <div class="form-group">
-                    <label for="touser">接收用户 (touser):</label>
-                    <input type="text" id="touser" name="touser" placeholder="输入接收用户">
+                    <label for="offlineCount">离线确认次数</label>
+                    <input type="number" id="offlineCount" min="1" max="100" value="5">
                 </div>
+                <div class="form-group">
+                    <label for="userAgent">User-Agent</label>
+                    <input type="text" id="userAgent" placeholder="ESP32-Monitor/1.0">
+                </div>
+                <div class="form-group">
+                    <label>监控状态</label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span id="monitorStatusBadge" class="status-badge stopped">已停止</span>
+                        <button onclick="toggleMonitor()" id="toggleMonitorBtn" class="btn btn-primary">启动监控</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-actions" style="margin-top: 20px;">
+                <button onclick="saveSystemConfig()" class="btn btn-primary">💾 保存配置</button>
+                <button onclick="checkAllNow()" class="btn btn-success">📤 立即检测</button>
+            </div>
+        </div>
+
+        <!-- 底部信息 -->
+        <div class="footer-info">
+            <span>距离下次检测还剩：<strong id="lastCheckTime">--</strong></span>
+            <span>检测状态: <strong id="checkStatus">空闲</strong></span>
+        </div>
+
+        <!-- 页脚 -->
+        <footer>
+            <p>ESP32-S3 打印服务器 v1.0</p>
+            <p>基于 ESP-IDF v5.5.3 + TinyUSB Host</p>
+        </footer>
+    </div>
+
+    <!-- 添加/编辑监控模态框 -->
+    <div id="siteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">添加监控</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            
+            <form id="siteForm">
+                <input type="hidden" id="editSiteName">
+                
+                <div class="form-group">
+                    <label for="siteName">网站名称 *</label>
+                    <input type="text" id="siteName" required placeholder="例如：百度">
+                </div>
+                
+                <div class="form-group">
+                    <label for="siteUrl">网址 *</label>
+                    <input type="text" id="siteUrl" required placeholder="https://www.baidu.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="siteHost">主机 Host (可选)</label>
+                    <input type="text" id="siteHost" placeholder="例如：www.baidu.com">
+                </div>
+                
+                <div class="form-group">
+                    <label>健康码</label>
+                    <div style="display:flex;gap:15px;flex-wrap:wrap;">
+                        <label style="display:flex;align-items:center;gap:5px;">
+                            <input type="checkbox" id="siteStatusCode1xx">
+                            <span>1xx (100-199)</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;">
+                            <input type="checkbox" id="siteStatusCode2xx" checked>
+                            <span>2xx (200-299)</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;">
+                            <input type="checkbox" id="siteStatusCode3xx">
+                            <span>3xx (300-399)</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;">
+                            <input type="checkbox" id="siteStatusCode4xx">
+                            <span>4xx (400-499)</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;">
+                            <input type="checkbox" id="siteStatusCode5xx">
+                            <span>5xx (500-599)</span>
+                        </label>
+                    </div>
+                    <small class="form-hint">选择接受的HTTP状态码范围</small>
+                </div>
+                
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="siteEnabled" checked>
+                    <label for="siteEnabled">启用监控</label>
+                </div>
+                
                 <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">保存配置</button>
-                    <button type="button" onclick="testNotification()" class="btn btn-secondary">发送测试通知</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
                 </div>
             </form>
-        </div>
-
-        <!-- 通知记录 -->
-        <div class="card">
-            <h2>通知记录</h2>
-            <div id="notifications" class="notifications">
-                <!-- 通知记录将在这里动态生成 -->
-            </div>
-        </div>
-
-        <!-- 提示信息 -->
-        <div class="card">
-            <h2>提示</h2>
-            <ul class="tips">
-                <li>支持 HTTP 和 HTTPS 网站</li>
-                <li>使用 HEAD 请求获取响应头</li>
-                <li>支持自定义检测间隔和超时时间</li>
-                <li>支持自定义离线确认次数</li>
-                <li>支持自定义在线判断标准（HTTP 状态码）</li>
-                <li>支持企业微信 Webhook 通知</li>
-                <li>通知格式包含：状态、站点名称、时间</li>
-            </ul>
         </div>
     </div>
 
     <script src="/js/app.js"></script>
     <script>
-        // 保存企业微信配置
-        function saveWechatConfig(event) {
-            event.preventDefault();
-
-            const corpid = document.getElementById('corpid').value;
-            const corpsecret = document.getElementById('corpsecret').value;
-            const agentid = document.getElementById('agentid').value;
-            const touser = document.getElementById('touser').value;
-
-            const data = `corpid=${encodeURIComponent(corpid)}&corpsecret=${encodeURIComponent(corpsecret)}&agentid=${encodeURIComponent(agentid)}&touser=${encodeURIComponent(touser)}`;
-
-            fetch('/api/config/wechat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: data
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('配置保存成功！');
-                } else {
-                    alert('配置保存失败: ' + data.message);
-                }
-            })
-            .catch(error => {
-                alert('请求失败: ' + error.message);
-            });
-        }
-
-        // 发送测试通知
-        function testNotification() {
-            fetch('/api/monitor/test', {
-                method: 'POST'
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('测试通知发送成功！');
-                } else {
-                    alert('测试通知发送失败: ' + data.message);
-                }
-            })
-            .catch(error => {
-                alert('请求失败: ' + error.message);
-            });
-        }
-
-        // 添加网站
-        function addSite() {
-            alert('添加网站功能开发中...');
-        }
-
-        // 更新网站列表
-        function updateSites() {
-            fetch('/api/status')
-                .then(res => res.json())
-                .then(data => {
-                    const sites = data.monitor_sites || [];
-                    const sitesEl = document.getElementById('sites');
-                    sitesEl.innerHTML = '';
-
-                    if (sites.length === 0) {
-                        sitesEl.innerHTML = '<p>暂无监控网站</p>';
-                        return;
-                    }
-
-                    sites.forEach(site => {
-                        const siteEl = document.createElement('div');
-                        siteEl.className = 'site-card';
-                        siteEl.innerHTML = `
-                            <div class="site-header">
-                                <h3>${site.name}</h3>
-                                <span class="status ${site.is_online ? 'status-online' : 'status-offline'}">
-                                    ${site.is_online ? '在线' : '离线'}
-                                </span>
-                            </div>
-                            <div class="site-info">
-                                <p>URL: ${site.url}</p>
-                                <p>最后检测: ${formatTime(site.last_check_time)}</p>
-                                <p>失败次数: ${site.fail_count}</p>
-                            </div>
-                            <div class="site-actions">
-                                <button onclick="removeSite('${site.name}')" class="btn btn-danger btn-sm">删除</button>
-                            </div>
-                        `;
-                        sitesEl.appendChild(siteEl);
-                    });
-                })
-                .catch(error => {
-                    console.error('获取网站列表失败:', error);
-                });
-        }
-
-        // 删除网站
-        function removeSite(name) {
-            if (!confirm(`确定要删除网站 "${name}" 吗？`)) {
-                return;
-            }
-
-            const data = `name=${encodeURIComponent(name)}`;
-
-            fetch('/api/monitor/remove', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: data
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('网站删除成功！');
-                    updateSites();
-                } else {
-                    alert('网站删除失败: ' + data.message);
-                }
-            })
-            .catch(error => {
-                alert('请求失败: ' + error.message);
-            });
-        }
+        let g_sites = [];
+        let g_states = [];
+        let g_systemConfig = {};
+        let g_lastUpdateTime = 0;
 
         // 格式化时间
         function formatTime(timestamp) {
@@ -205,9 +361,342 @@
             return date.toLocaleString('zh-CN');
         }
 
-        // 定时更新网站列表
-        setInterval(updateSites, 5000);
-        updateSites();
+        // 获取距离下次检测剩余时间
+        function getCountdownTime(lastCheckTime, checkInterval) {
+            if (!lastCheckTime) return '已暂停';
+            const now = Math.floor(Date.now() / 1000);
+            const intervalSeconds = (checkInterval || 3) * 60;
+            const elapsed = now - lastCheckTime;
+            const remaining = Math.max(0, intervalSeconds - elapsed);
+            if (remaining <= 0) return '【 0分0秒 】';
+            if (remaining < 60) return '【 0分' + remaining + '秒 】';
+            const mins = Math.floor(remaining / 60);
+            const secs = remaining % 60;
+            return '【 ' + mins + '分' + secs + '秒 】';
+        }
+
+        // 更新监控列表表格
+        function updateSitesTable() {
+            const tbody = document.getElementById('sitesTableBody');
+            
+            if (g_sites.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999;">暂无监控网站</td></tr>';
+                return;
+            }
+            
+            let html = '';
+            g_sites.forEach((site, index) => {
+                const state = g_states[index] || {};
+                const offlineThreshold = site.offline_count || g_systemConfig.global_offline_count || 5;
+                const currentFailCount = Math.min(state.fail_count || 0, offlineThreshold);
+                
+                let statusClass, statusText;
+                if (site.paused) {
+                    statusClass = 'status-paused';
+                    statusText = '暂停';
+                } else if (state.is_online) {
+                    statusClass = 'status-online';
+                    statusText = '正常';
+                } else if (state.is_online === false) {
+                    statusClass = 'status-offline';
+                    statusText = '离线';
+                } else {
+                    statusClass = 'status-unknown';
+                    statusText = '未知';
+                }
+                
+                // 生成健康码显示
+                let statusCodes = [];
+                if (site.status_code_1xx) statusCodes.push('1xx');
+                if (site.status_code_2xx) statusCodes.push('2xx');
+                if (site.status_code_3xx) statusCodes.push('3xx');
+                if (site.status_code_4xx) statusCodes.push('4xx');
+                if (site.status_code_5xx) statusCodes.push('5xx');
+                const statusCodesText = statusCodes.length > 0 ? statusCodes.join(',') : '2xx';
+                
+                html += `
+                    <tr>
+                        <td>${site.name}</td>
+                        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${site.url}</td>
+                        <td class="${statusClass}">${statusText}</td>
+                        <td>${state.last_notify_time ? formatTime(state.last_notify_time) : '--'}</td>
+                        <td>${site.custom_host || '--'}</td>
+                        <td>${currentFailCount}/${offlineThreshold}</td>
+                        <td>${statusCodesText}</td>
+                        <td>
+                            <div class="btn-group">
+                                <button onclick="togglePause('${site.name}')" class="btn btn-small ${site.paused ? 'btn-success' : 'btn-warning'}">
+                                    ${site.paused ? '恢复' : '暂停'}
+                                </button>
+                                <button onclick="editSite('${site.name}')" class="btn btn-small btn-info">编辑</button>
+                                <button onclick="deleteSite('${site.name}')" class="btn btn-small btn-danger">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            tbody.innerHTML = html;
+        }
+
+        // 更新系统配置显示
+        function updateSystemConfigDisplay() {
+            document.getElementById('checkInterval').value = g_systemConfig.global_check_interval || 3;
+            document.getElementById('notifyInterval').value = g_systemConfig.global_notify_interval || 20;
+            document.getElementById('timeout').value = g_systemConfig.global_timeout || 3;
+            document.getElementById('offlineCount').value = g_systemConfig.global_offline_count || 5;
+            document.getElementById('userAgent').value = g_systemConfig.global_user_agent || '';
+        }
+
+        // 更新监控状态显示
+        function updateMonitorStatus(isRunning) {
+            const badge = document.getElementById('monitorStatusBadge');
+            const btn = document.getElementById('toggleMonitorBtn');
+            
+            if (isRunning) {
+                badge.textContent = '运行中';
+                badge.className = 'status-badge running';
+                btn.textContent = '停止监控';
+                btn.className = 'btn btn-warning';
+            } else {
+                badge.textContent = '已停止';
+                badge.className = 'status-badge stopped';
+                btn.textContent = '启动监控';
+                btn.className = 'btn btn-primary';
+            }
+        }
+
+        // 加载数据
+        function loadData() {
+            fetch('/api/status?v=' + Date.now())
+                .then(r => r.json())
+                .then(data => {
+                    if (data.monitor_sites) {
+                        g_sites = data.monitor_sites;
+                    }
+                    if (data.monitor_states) {
+                        g_states = data.monitor_states;
+                    }
+                    if (data.monitor_system_config) {
+                        g_systemConfig = data.monitor_system_config;
+                        updateSystemConfigDisplay();
+                        updateMonitorStatus(g_systemConfig.global_enabled);
+                    }
+                    // 每次刷新页面时从服务器获取最后检测时间并更新倒计时
+                    if (g_systemConfig.global_enabled && data.monitor_last_check) {
+                        document.getElementById('lastCheckTime').textContent = getCountdownTime(data.monitor_last_check, g_systemConfig.global_check_interval);
+                    } else {
+                        document.getElementById('lastCheckTime').textContent = '已暂停';
+                    }
+                    
+                    updateSitesTable();
+                })
+                .catch(e => console.error('Load data error:', e));
+        }
+
+        // 打开添加模态框
+        function openAddModal() {
+            document.getElementById('modalTitle').textContent = '添加监控';
+            document.getElementById('siteForm').reset();
+            document.getElementById('editSiteName').value = '';
+            document.getElementById('siteEnabled').checked = true;
+            document.getElementById('siteStatusCode1xx').checked = false;
+            document.getElementById('siteStatusCode2xx').checked = true;
+            document.getElementById('siteStatusCode3xx').checked = false;
+            document.getElementById('siteStatusCode4xx').checked = false;
+            document.getElementById('siteStatusCode5xx').checked = false;
+            document.getElementById('siteModal').style.display = 'block';
+        }
+
+        // 编辑站点
+        function editSite(name) {
+            const site = g_sites.find(s => s.name === name);
+            if (!site) return;
+            
+            document.getElementById('modalTitle').textContent = '编辑监控';
+            document.getElementById('editSiteName').value = name;
+            document.getElementById('siteName').value = site.name;
+            document.getElementById('siteUrl').value = site.url;
+            document.getElementById('siteHost').value = site.custom_host || '';
+            document.getElementById('siteEnabled').checked = site.enabled !== false;
+            document.getElementById('siteStatusCode1xx').checked = site.status_code_1xx || false;
+            document.getElementById('siteStatusCode2xx').checked = site.status_code_2xx !== false;
+            document.getElementById('siteStatusCode3xx').checked = site.status_code_3xx || false;
+            document.getElementById('siteStatusCode4xx').checked = site.status_code_4xx || false;
+            document.getElementById('siteStatusCode5xx').checked = site.status_code_5xx || false;
+            
+            document.getElementById('siteModal').style.display = 'block';
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            document.getElementById('siteModal').style.display = 'none';
+        }
+
+        // 保存站点
+        document.getElementById('siteForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const editName = document.getElementById('editSiteName').value;
+            const site = {
+                name: document.getElementById('siteName').value,
+                url: document.getElementById('siteUrl').value,
+                custom_host: document.getElementById('siteHost').value,
+                enabled: document.getElementById('siteEnabled').checked,
+                status_code_1xx: document.getElementById('siteStatusCode1xx').checked,
+                status_code_2xx: document.getElementById('siteStatusCode2xx').checked,
+                status_code_3xx: document.getElementById('siteStatusCode3xx').checked,
+                status_code_4xx: document.getElementById('siteStatusCode4xx').checked,
+                status_code_5xx: document.getElementById('siteStatusCode5xx').checked
+            };
+            
+            const endpoint = editName ? '/api/monitor/site/update' : '/api/monitor/site/add';
+            
+            fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ site, old_name: editName })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('保存成功！');
+                    closeModal();
+                    loadData();
+                } else {
+                    alert('保存失败: ' + (data.message || '未知错误'));
+                }
+            })
+            .catch(e => alert('请求失败: ' + e.message));
+        });
+
+        // 切换站点暂停状态
+        function togglePause(name) {
+            const site = g_sites.find(s => s.name === name);
+            if (!site) return;
+            
+            site.paused = !site.paused;
+            
+            fetch('/api/monitor/site/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ site, old_name: name })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    loadData();
+                } else {
+                    alert('操作失败: ' + (data.message || '未知错误'));
+                }
+            })
+            .catch(e => alert('请求失败: ' + e.message));
+        }
+
+
+
+        // 删除站点
+        function deleteSite(name) {
+            if (!confirm('确定要删除监控 "' + name + '" 吗？')) return;
+            
+            fetch('/api/monitor/site/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('删除成功！');
+                    loadData();
+                } else {
+                    alert('删除失败: ' + (data.message || '未知错误'));
+                }
+            })
+            .catch(e => alert('请求失败: ' + e.message));
+        }
+
+        // 保存系统配置
+        function saveSystemConfig() {
+            const config = {
+                global_check_interval: parseInt(document.getElementById('checkInterval').value),
+                global_notify_interval: parseInt(document.getElementById('notifyInterval').value),
+                global_timeout: parseInt(document.getElementById('timeout').value),
+                global_offline_count: parseInt(document.getElementById('offlineCount').value),
+                global_user_agent: document.getElementById('userAgent').value
+            };
+            
+            fetch('/api/monitor/system_config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('配置保存成功！');
+                    loadData();
+                } else {
+                    alert('保存失败: ' + (data.message || '未知错误'));
+                }
+            })
+            .catch(e => alert('请求失败: ' + e.message));
+        }
+
+        // 切换监控状态
+        function toggleMonitor() {
+            const isRunning = g_systemConfig.global_enabled;
+            const newState = !isRunning;
+            
+            fetch('/api/monitor/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: newState })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    g_systemConfig.global_enabled = newState;
+                    updateMonitorStatus(newState);
+                } else {
+                    alert('操作失败: ' + (data.message || '未知错误'));
+                }
+            })
+            .catch(e => alert('请求失败: ' + e.message));
+        }
+
+        // 立即检测所有站点
+        function checkAllNow() {
+            fetch('/api/monitor/check_all', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('已开始检测，请稍后查看结果！');
+                        document.getElementById('checkStatus').textContent = '检测中...';
+                        setTimeout(() => {
+                            loadData();
+                            document.getElementById('checkStatus').textContent = '空闲';
+                        }, 3000);
+                    } else {
+                        alert('检测失败: ' + (data.message || '未知错误'));
+                    }
+                })
+                .catch(e => alert('请求失败: ' + e.message));
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('siteModal');
+            if (event.target == modal) {
+                closeModal();
+            }
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadData();
+            setInterval(loadData, 5000);
+        });
     </script>
 </body>
 </html>

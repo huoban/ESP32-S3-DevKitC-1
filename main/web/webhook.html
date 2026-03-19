@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通知配置 - ESP32-S3 打印服务器</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .card-section {
+            margin-bottom: 20px;
+        }
+        
+        .card-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .card-section-header h2 {
+            margin: 0;
+            border: none;
+            padding: 0;
+        }
+        
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+        }
+        
+        .config-group {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .config-group-title {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .btn-large {
+            padding: 15px 30px;
+            font-size: 16px;
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: linear-gradient(135deg, #218838 0%, #1baa85 100%);
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .status-enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .quick-tips {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        
+        .quick-tips h4 {
+            color: #856404;
+            margin: 0 0 10px 0;
+            font-size: 14px;
+        }
+        
+        .quick-tips ul {
+            margin: 0;
+            padding-left: 20px;
+            color: #856404;
+            font-size: 13px;
+        }
+        
+        .quick-tips li {
+            margin: 5px 0;
+        }
+        
+        @media (max-width: 768px) {
+            .config-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .form-actions {
+                flex-direction: column;
+            }
+            
+            .btn-large {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>🔔 通知配置</h1>
+                <p class="subtitle">配置邮件、企业微信和自定义 WebHook 通知</p>
+            </div>
+            <a href="/" class="btn btn-secondary">← 返回首页</a>
+        </header>
+
+        <!-- 邮件通知配置 -->
+        <div class="card">
+            <div class="card-section-header">
+                <h2>📧 邮件通知 (SMTP)</h2>
+                <span id="smtp-status" class="status-badge status-disabled">未启用</span>
+            </div>
+            
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="smtp_enabled" onchange="updateSmtpStatus()">
+                <label for="smtp_enabled">启用邮件通知</label>
+            </div>
+            
+            <div class="config-grid">
+                <div class="config-group">
+                    <div class="config-group-title">服务器设置</div>
+                    <div class="form-group">
+                        <label for="smtp_server">SMTP 地址</label>
+                        <input type="text" id="smtp_server" placeholder="smtp.qq.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtp_port">SMTP 端口</label>
+                        <select id="smtp_port">
+                            <option value="587">587 (推荐)</option>
+                            <option value="25">25</option>
+                            <option value="465">465 (SSL)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="config-group">
+                    <div class="config-group-title">账号信息</div>
+                    <div class="form-group">
+                        <label for="smtp_username">账号</label>
+                        <input type="text" id="smtp_username" placeholder="your@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtp_password">密码/授权码</label>
+                        <input type="text" id="smtp_password" placeholder="password">
+                    </div>
+                </div>
+                
+                <div class="config-group">
+                    <div class="config-group-title">邮件收发</div>
+                    <div class="form-group">
+                        <label for="smtp_from">发件人邮箱</label>
+                        <input type="email" id="smtp_from" placeholder="sender@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="smtp_to">收件人邮箱</label>
+                        <input type="email" id="smtp_to" placeholder="recipient@email.com">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="quick-tips">
+                <h4>💡 提示</h4>
+                <ul>
+                    <li>QQ邮箱需要使用授权码而非登录密码</li>
+                    <li>163邮箱建议使用端口465 (SSL)</li>
+                    <li>Gmail需要开启"不太安全的应用访问"</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 企业微信通知配置 -->
+        <div class="card">
+            <div class="card-section-header">
+                <h2>💬 企业微信通知</h2>
+                <span id="wechat-status" class="status-badge status-disabled">未启用</span>
+            </div>
+            
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="wechat_enabled" onchange="updateWechatStatus()">
+                <label for="wechat_enabled">启用企业微信通知</label>
+            </div>
+            
+            <div class="config-grid">
+                <div class="config-group">
+                    <div class="config-group-title">企业信息</div>
+                    <div class="form-group">
+                        <label for="wechat_corpid">企业 ID (corpid)</label>
+                        <input type="text" id="wechat_corpid" placeholder="wwxxxxxxxxxxxxxxxxx">
+                    </div>
+                    <div class="form-group">
+                        <label for="wechat_agentid">应用 ID (agentid)</label>
+                        <input type="text" id="wechat_agentid" placeholder="1000001">
+                    </div>
+                </div>
+                
+                <div class="config-group">
+                    <div class="config-group-title">认证信息</div>
+                    <div class="form-group">
+                        <label for="wechat_corpsecret">应用密钥 (corpsecret)</label>
+                        <input type="text" id="wechat_corpsecret" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                    </div>
+                    <div class="form-group">
+                        <label for="wechat_touser">接收用户 (touser)</label>
+                        <input type="text" id="wechat_touser" placeholder="UserID1|UserID2">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="quick-tips">
+                <h4>💡 提示</h4>
+                <ul>
+                    <li>corpid 在企业微信管理后台 → 我的企业 获取</li>
+                    <li>agentid 和 corpsecret 在应用管理 → 创建应用 获取</li>
+                    <li>touser 支持多个用户，用 | 分隔</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 自定义 WebHook 配置 -->
+        <div class="card">
+            <div class="card-section-header">
+                <h2>🔗 自定义 WebHook</h2>
+                <span id="custom-status" class="status-badge status-disabled">未启用</span>
+            </div>
+            
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="webhook_enabled" onchange="updateCustomStatus()">
+                <label for="webhook_enabled">启用自定义 WebHook</label>
+            </div>
+            
+            <div class="config-grid">
+                <div class="config-group">
+                    <div class="config-group-title">请求设置</div>
+                    <div class="form-group">
+                        <label for="webhook_protocol">协议</label>
+                        <select id="webhook_protocol">
+                            <option value="https://">https://</option>
+                            <option value="http://">http://</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="webhook_url">WebHook 地址</label>
+                        <input type="text" id="webhook_url" placeholder="example.com/webhook">
+                    </div>
+                </div>
+                
+                <div class="config-group">
+                    <div class="config-group-title">请求配置</div>
+                    <div class="form-group">
+                        <label for="webhook_method">请求方法</label>
+                        <select id="webhook_method">
+                            <option value="POST">POST</option>
+                            <option value="GET">GET</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="webhook_content_type">内容类型</label>
+                        <input type="text" id="webhook_content_type" placeholder="application/json" value="application/json">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="webhook_body">请求体模板 (JSON)</label>
+                <textarea id="webhook_body" rows="5" placeholder='{"title":"","content":""}'>{"title":"","content":""}</textarea>
+                <small class="form-hint">使用 {title} 和 {content} 占位符，会被实际内容替换</small>
+            </div>
+            
+            <div class="quick-tips">
+                <h4>💡 提示</h4>
+                <ul>
+                    <li>支持钉钉、飞书、Slack 等第三方 WebHook</li>
+                    <li>模板示例：{"msgtype":"text","text":{"content":"{title} {content}"}}</li>
+                    <li>确保 WebHook 地址可以被 ESP32 访问</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 保存配置 -->
+        <div class="card">
+            <div class="form-actions">
+                <button onclick="saveWebhookConfig()" class="btn btn-primary btn-large">💾 保存配置</button>
+                <button onclick="testWebhookAll()" class="btn btn-success btn-large">📤 发送测试通知</button>
+            </div>
+        </div>
+
+        <!-- 页脚 -->
+        <footer>
+            <p>ESP32-S3 打印服务器 v1.0</p>
+            <p>基于 ESP-IDF v5.5.3 + TinyUSB Host</p>
+        </footer>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script>
+        function updateSmtpStatus() {
+            const enabled = document.getElementById('smtp_enabled').checked;
+            const badge = document.getElementById('smtp-status');
+            badge.textContent = enabled ? '已启用' : '未启用';
+            badge.className = enabled ? 'status-badge status-enabled' : 'status-badge status-disabled';
+        }
+        
+        function updateWechatStatus() {
+            const enabled = document.getElementById('wechat_enabled').checked;
+            const badge = document.getElementById('wechat-status');
+            badge.textContent = enabled ? '已启用' : '未启用';
+            badge.className = enabled ? 'status-badge status-enabled' : 'status-badge status-disabled';
+        }
+        
+        function updateCustomStatus() {
+            const enabled = document.getElementById('webhook_enabled').checked;
+            const badge = document.getElementById('custom-status');
+            badge.textContent = enabled ? '已启用' : '未启用';
+            badge.className = enabled ? 'status-badge status-enabled' : 'status-badge status-disabled';
+        }
+        
+        function loadWebhookConfig() {
+            fetch('/api/config/webhook')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const cfg = data;
+                        document.getElementById('smtp_enabled').checked = cfg.smtp?.enabled || false;
+                        document.getElementById('smtp_server').value = cfg.smtp?.smtp_server || '';
+                        document.getElementById('smtp_port').value = cfg.smtp?.smtp_port || '587';
+                        document.getElementById('smtp_username').value = cfg.smtp?.username || '';
+                        document.getElementById('smtp_password').value = cfg.smtp?.password || '';
+                        document.getElementById('smtp_from').value = cfg.smtp?.from_email || '';
+                        document.getElementById('smtp_to').value = cfg.smtp?.to_email || '';
+                        
+                        document.getElementById('wechat_enabled').checked = cfg.wechat?.enabled || false;
+                        document.getElementById('wechat_corpid').value = cfg.wechat?.corpid || '';
+                        document.getElementById('wechat_corpsecret').value = cfg.wechat?.corpsecret || '';
+                        document.getElementById('wechat_agentid').value = cfg.wechat?.agentid || '';
+                        document.getElementById('wechat_touser').value = cfg.wechat?.touser || '';
+                        
+                        document.getElementById('webhook_enabled').checked = cfg.custom?.enabled || false;
+                        const url = cfg.custom?.url || '';
+                        if (url.startsWith('https://')) {
+                            document.getElementById('webhook_protocol').value = 'https://';
+                            document.getElementById('webhook_url').value = url.substring(8);
+                        } else if (url.startsWith('http://')) {
+                            document.getElementById('webhook_protocol').value = 'http://';
+                            document.getElementById('webhook_url').value = url.substring(7);
+                        } else {
+                            document.getElementById('webhook_url').value = url;
+                        }
+                        document.getElementById('webhook_method').value = cfg.custom?.method || 'POST';
+                        document.getElementById('webhook_content_type').value = cfg.custom?.content_type || 'application/json';
+                        document.getElementById('webhook_body').value = cfg.custom?.body_template || '{"title":"","content":""}';
+                        
+                        updateSmtpStatus();
+                        updateWechatStatus();
+                        updateCustomStatus();
+                    }
+                })
+                .catch(e => console.error('Load config error:', e));
+        }
+
+        function saveWebhookConfig() {
+            const config = {
+                smtp: {
+                    enabled: document.getElementById('smtp_enabled').checked,
+                    smtp_server: document.getElementById('smtp_server').value,
+                    smtp_port: parseInt(document.getElementById('smtp_port').value),
+                    username: document.getElementById('smtp_username').value,
+                    password: document.getElementById('smtp_password').value,
+                    from_email: document.getElementById('smtp_from').value,
+                    to_email: document.getElementById('smtp_to').value
+                },
+                wechat: {
+                    enabled: document.getElementById('wechat_enabled').checked,
+                    corpid: document.getElementById('wechat_corpid').value,
+                    corpsecret: document.getElementById('wechat_corpsecret').value,
+                    agentid: document.getElementById('wechat_agentid').value,
+                    touser: document.getElementById('wechat_touser').value
+                },
+                custom: {
+                    enabled: document.getElementById('webhook_enabled').checked,
+                    url: document.getElementById('webhook_protocol').value + document.getElementById('webhook_url').value,
+                    method: document.getElementById('webhook_method').value,
+                    content_type: document.getElementById('webhook_content_type').value,
+                    body_template: document.getElementById('webhook_body').value
+                }
+            };
+
+            fetch('/api/config/webhook', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('配置保存成功！');
+                } else {
+                    alert('保存失败: ' + data.message);
+                }
+            })
+            .catch(e => alert('请求失败: ' + e.message));
+        }
+
+        function testWebhookAll() {
+            const title = '测试通知';
+            const content = '这是一条来自ESP32-S3打印服务器的测试消息';
+            
+            fetch('/api/webhook/test/all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, content })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('测试通知发送成功！已依次发送到所有启用的通知方式。');
+                } else {
+                    alert('发送失败: ' + data.message);
+                }
+            })
+            .catch(e => alert('请求失败: ' + e.message));
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadWebhookConfig();
+        });
+    </script>
+</body>
+</html>

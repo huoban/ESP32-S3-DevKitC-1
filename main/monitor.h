@@ -10,11 +10,18 @@
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "config.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// ==================== 常量定义 ====================
+#define MONITOR_MAX_SITES 10             // 最大监控网站数量
+#define MONITOR_TASK_STACK_SIZE 8192    // 监控任务栈大小
+#define MONITOR_TASK_PRIORITY 4        // 监控任务优先级（低于打印任务）
+#define MONITOR_CHECK_DELAY_MS 1000      // 站点间检测延迟（毫秒）
 
 // ==================== 网站检测状态结构 ====================
 /**
@@ -64,6 +71,13 @@ esp_err_t monitor_add_site(const monitor_site_t* site);
 esp_err_t monitor_remove_site(const char* name);
 
 /**
+ * @brief 更新监控网站
+ * @param site 网站配置指针
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t monitor_update_site(const monitor_site_t* site);
+
+/**
  * @brief 获取网站配置
  * @param name 网站名称
  * @param site 网站配置指针
@@ -80,7 +94,21 @@ esp_err_t monitor_get_site(const char* name, monitor_site_t* site);
 esp_err_t monitor_get_all_sites(monitor_site_t* sites, size_t* count);
 
 /**
- * @brief 检测网站状态
+ * @brief 获取所有网站状态
+ * @param states 网站状态数组
+ * @param count 网站数量指针
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t monitor_get_all_states(monitor_state_t* states, size_t* count);
+
+/**
+ * @brief 立即检测所有网站
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t monitor_check_all_sites(void);
+
+/**
+ * @brief 检测单个网站
  * @param name 网站名称
  * @return ESP_OK 成功，其他值失败
  */
@@ -90,9 +118,10 @@ esp_err_t monitor_check_site(const char* name);
  * @brief 发送通知
  * @param site_name 网站名称
  * @param is_online 在线状态
+ * @param site_url 网站地址
  * @return ESP_OK 成功，其他值失败
  */
-esp_err_t monitor_send_notification(const char* site_name, bool is_online);
+esp_err_t monitor_send_notification(const char* site_name, bool is_online, const char* site_url);
 
 /**
  * @brief 发送测试通知
@@ -113,6 +142,20 @@ esp_err_t monitor_load_config(void);
 esp_err_t monitor_save_config(void);
 
 /**
+ * @brief 加载系统配置
+ * @param config 系统配置指针
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t monitor_get_system_config(monitor_system_config_t* config);
+
+/**
+ * @brief 保存系统配置
+ * @param config 系统配置指针
+ * @return ESP_OK 成功，其他值失败
+ */
+esp_err_t monitor_set_system_config(const monitor_system_config_t* config);
+
+/**
  * @brief 检查监控是否运行
  * @return true 运行中，false 已停止
  */
@@ -125,6 +168,12 @@ bool monitor_is_running(void);
  * @return ESP_OK 成功，其他值失败
  */
 esp_err_t monitor_get_site_state(const char* name, monitor_state_t* state);
+
+/**
+ * @brief 获取最后检测时间
+ * @return 最后检测时间（秒）
+ */
+uint32_t monitor_get_last_check_time(void);
 
 #ifdef __cplusplus
 }

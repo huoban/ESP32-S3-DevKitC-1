@@ -29,6 +29,12 @@ extern const uint8_t usb_html_end[] asm("_binary_usb_html_end");
 extern const uint8_t monitor_html_start[] asm("_binary_monitor_html_start");
 extern const uint8_t monitor_html_end[] asm("_binary_monitor_html_end");
 
+extern const uint8_t webhook_html_start[] asm("_binary_webhook_html_start");
+extern const uint8_t webhook_html_end[] asm("_binary_webhook_html_end");
+
+extern const uint8_t sensors_html_start[] asm("_binary_sensors_html_start");
+extern const uint8_t sensors_html_end[] asm("_binary_sensors_html_end");
+
 extern const uint8_t app_js_start[] asm("_binary_app_js_start");
 extern const uint8_t app_js_end[] asm("_binary_app_js_end");
 
@@ -46,6 +52,8 @@ static const struct {
     {"/wifi.html", wifi_html_start, wifi_html_end},
     {"/usb.html", usb_html_start, usb_html_end},
     {"/monitor.html", monitor_html_start, monitor_html_end},
+    {"/webhook.html", webhook_html_start, webhook_html_end},
+    {"/sensors.html", sensors_html_start, sensors_html_end},
     {"/js/app.js", app_js_start, app_js_end},
     {"/css/style.css", style_css_start, style_css_end},
 };

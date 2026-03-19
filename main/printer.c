@@ -17,6 +17,9 @@ static const char *TAG = "PRINTER";
 
 #define CLIENT_NUM_EVENT_MSG        5
 
+// 前置声明
+static void printer_task(void *pvParameters);
+
 typedef enum {
     ACTION_OPEN_DEV         = (1 << 0),
     ACTION_GET_DEV_INFO     = (1 << 1),
@@ -63,6 +66,13 @@ static TaskHandle_t g_usb_host_task_handle = NULL;
 static TaskHandle_t g_class_driver_task_handle = NULL;
 static SemaphoreHandle_t g_printer_mutex = NULL;
 static class_driver_t *s_driver_obj = NULL;
+
+// 新增：每个打印机独立的任务和队列
+static TaskHandle_t g_printer_task_handles[PRINTER_MAX_COUNT] = {NULL};
+static QueueHandle_t g_printer_queues[PRINTER_MAX_COUNT] = {NULL};
+
+// 新增：事件组管理打印忙碌状态
+static EventGroupHandle_t g_print_busy_event_group = NULL;
 
 static void client_event_cb(const usb_host_client_event_msg_t *event_msg, void *arg)
 {
@@ -479,7 +489,30 @@ esp_err_t printer_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "Printer module initialized");
+    // 初始化事件组
+    g_print_busy_event_group = xEventGroupCreate();
+    if (g_print_busy_event_group == NULL) {
+        ESP_LOGE(TAG, "Failed to create print busy event group");
+        vSemaphoreDelete(g_printer_mutex);
+        return ESP_ERR_NO_MEM;
+    }
+
+    // 初始化每个打印机的队列
+    for (int i = 0; i < PRINTER_MAX_COUNT; i++) {
+        g_printer_queues[i] = xQueueCreate(PRINTER_QUEUE_LENGTH, sizeof(printer_queue_item_t));
+        if (g_printer_queues[i] == NULL) {
+            ESP_LOGE(TAG, "Failed to create queue for printer %d", i);
+            // 清理已创建的队列
+            for (int j = 0; j < i; j++) {
+                vQueueDelete(g_printer_queues[j]);
+            }
+            vEventGroupDelete(g_print_busy_event_group);
+            vSemaphoreDelete(g_printer_mutex);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    ESP_LOGI(TAG, "Printer module initialized with queues and event group");
 
     return ESP_OK;
 }
@@ -507,6 +540,21 @@ esp_err_t printer_start(void)
                                            &g_class_driver_task_handle,
                                            0);
     assert(task_created == pdTRUE);
+
+    // 启动每个打印机的独立任务，优先级设置为 6（与TCP服务器相同）
+    for (int i = 0; i < PRINTER_MAX_COUNT; i++) {
+        char task_name[32];
+        snprintf(task_name, sizeof(task_name), "printer_task_%d", i);
+        task_created = xTaskCreatePinnedToCore(printer_task,
+                                               task_name,
+                                               8192,
+                                               (void*)(uint32_t)i,
+                                               6,
+                                               &g_printer_task_handles[i],
+                                               1);  // 绑定到核心1
+        assert(task_created == pdTRUE);
+        ESP_LOGI(TAG, "Started printer %d task", i);
+    }
 
     ESP_LOGI(TAG, "Printer module started");
 
@@ -643,8 +691,9 @@ esp_err_t printer_send_data(uint8_t instance, const uint8_t* data, size_t len, u
         if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout_ms)) == 0) {
             ESP_LOGE(TAG, "Transfer timeout");
             ret = ESP_ERR_TIMEOUT;
-            // 注意：超时情况下我们不释放transfer，因为回调可能还在运行
-            // 这是一个简化处理，实际应用中需要更完善的超时处理
+            // 超时情况下，等待一小段时间让回调完成，然后释放 transfer
+            vTaskDelay(pdMS_TO_TICKS(10));
+            usb_host_transfer_free(transfer);
             break;
         }
         
@@ -895,4 +944,96 @@ int printer_find_instance_by_serial(const char* serial_number) {
     }
     
     return -1;
+}
+
+// ==================== 新增功能：事件组和队列管理 ====================
+
+// 打印机任务 - 每个打印机独立的任务，阻塞在自己的队列上
+static void printer_task(void *pvParameters)
+{
+    uint8_t instance = (uint8_t)(uint32_t)pvParameters;
+    ESP_LOGI(TAG, "Printer %d task started", instance);
+
+    const EventBits_t busy_bit = (1 << instance);
+
+    while (1) {
+        printer_queue_item_t item;
+
+        // 阻塞等待队列数据，portMAX_DELAY 表示永久等待
+        if (xQueueReceive(g_printer_queues[instance], &item, portMAX_DELAY) == pdPASS) {
+            if (item.data && item.len > 0) {
+                ESP_LOGI(TAG, "Printer %d received %zu bytes from queue", instance, item.len);
+
+                // 设置事件组位，标记打印机忙碌
+                xEventGroupSetBits(g_print_busy_event_group, busy_bit);
+
+                // 发送数据到打印机
+                esp_err_t err = printer_send_data(instance, item.data, item.len, 30000);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "Printer %d failed to send data: %s", instance, esp_err_to_name(err));
+                }
+
+                // 清除事件组位，标记打印机空闲
+                xEventGroupClearBits(g_print_busy_event_group, busy_bit);
+
+                // 释放数据内存
+                if (item.data != NULL) {
+                    heap_caps_free(item.data);
+                }
+            }
+        }
+    }
+}
+
+// 获取打印忙碌事件组句柄
+EventGroupHandle_t printer_get_busy_event_group(void)
+{
+    return g_print_busy_event_group;
+}
+
+// 向打印机队列发送数据
+esp_err_t printer_enqueue_data(uint8_t instance, const uint8_t* data, size_t len, uint32_t timeout_ms)
+{
+    if (instance >= PRINTER_MAX_COUNT || data == NULL || len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!printer_is_connected(instance)) {
+        ESP_LOGE(TAG, "Printer %d not connected", instance);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // 分配内存拷贝数据
+    uint8_t* data_copy = (uint8_t*)heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (data_copy == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for queue item");
+        return ESP_ERR_NO_MEM;
+    }
+    memcpy(data_copy, data, len);
+
+    printer_queue_item_t item = {
+        .data = data_copy,
+        .len = len
+    };
+
+    // 发送到队列
+    if (xQueueSend(g_printer_queues[instance], &item, pdMS_TO_TICKS(timeout_ms)) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to send data to printer %d queue", instance);
+        heap_caps_free(data_copy);
+        data_copy = NULL;
+        return ESP_ERR_TIMEOUT;
+    }
+
+    ESP_LOGI(TAG, "Enqueued %zu bytes to printer %d queue", len, instance);
+    return ESP_OK;
+}
+
+// 检查是否有任何打印机正在忙碌
+bool printer_any_busy(void)
+{
+    if (g_print_busy_event_group == NULL) {
+        return false;
+    }
+    EventBits_t bits = xEventGroupGetBits(g_print_busy_event_group);
+    return (bits & ALL_PRINT_BUSY_BITS) != 0;
 }
