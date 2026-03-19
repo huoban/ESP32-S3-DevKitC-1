@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gitnexus": {
+      "command": "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\gitnexus.cmd",
+      "args": ["mcp"]
+    }
+  }
+}
