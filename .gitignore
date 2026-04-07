@@ -26,6 +26,7 @@ __pycache__/
 .DS_Store
 
 # ESP-IDF 临时文件
+sdkconfig
 sdkconfig.old
 
 # 项目特定文件排除
@@ -47,8 +48,8 @@ trae-mcp-config.json
 # 保留根目录的 CMakeLists.txt
 !CMakeLists.txt
 
-# 保留 sdkconfig 和 sdkconfig.defaults
-!sdkconfig
+# 保留 sdkconfig.defaults
+
 !sdkconfig.defaults
 
 # 保留分区表
