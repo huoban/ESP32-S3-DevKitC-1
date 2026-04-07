@@ -354,6 +354,15 @@ esp_err_t web_server_start(void) {
         };
         httpd_register_uri_handler(g_server, &wifi_uri);
 
+        // 注册获取 WiFi 配置接口（GET - 读取）
+        httpd_uri_t wifi_get_uri = {
+            .uri = "/api/config/wifi",
+            .method = HTTP_GET,
+            .handler = get_wifi_config_api_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(g_server, &wifi_get_uri);
+
         // 注册监控配置接口
         httpd_uri_t monitor_uri = {
             .uri = "/api/config/monitor",

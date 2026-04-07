@@ -43,6 +43,13 @@ esp_err_t wifi_scan_api_handler(httpd_req_t *req);
 esp_err_t save_wifi_config_api_handler(httpd_req_t *req);
 
 /**
+ * @brief 获取 WiFi 配置 API
+ * @param req HTTP 请求
+ * @return esp_err_t 错误代码
+ */
+esp_err_t get_wifi_config_api_handler(httpd_req_t *req);
+
+/**
  * @brief URL 解码辅助函数
  * @param src 源字符串
  * @param dest 目标字符串

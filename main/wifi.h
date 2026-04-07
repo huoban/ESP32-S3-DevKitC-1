@@ -50,11 +50,10 @@ esp_err_t wifi_start_ap(const char* ssid);
 
 /**
  * @brief 启动 STA 模式
- * @param ssid WiFi SSID
- * @param password WiFi 密码
+ * @param config WiFi 完整配置
  * @return ESP_OK 成功，其他值失败
  */
-esp_err_t wifi_start_sta(const char* ssid, const char* password);
+esp_err_t wifi_start_sta(const wifi_config_t_custom* config);
 
 /**
  * @brief 停止 WiFi

@@ -103,6 +103,44 @@
 
     <script src="/js/app.js"></script>
     <script>
+        // 页面加载时获取已保存的 WiFi 配置
+        document.addEventListener('DOMContentLoaded', function() {
+            loadWifiConfig();
+        });
+
+        // 加载已保存的 WiFi 配置
+        function loadWifiConfig() {
+            fetch('/api/config/wifi')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        if (data.ssid) {
+                            document.getElementById('ssid').value = data.ssid;
+                        }
+                        if (data.password) {
+                            document.getElementById('password').value = data.password;
+                        }
+                        if (data.use_static_ip) {
+                            if (data.ip_address) {
+                                document.getElementById('ip_address').value = data.ip_address;
+                            }
+                            if (data.gateway) {
+                                document.getElementById('gateway').value = data.gateway;
+                            }
+                            if (data.netmask) {
+                                document.getElementById('netmask').value = data.netmask;
+                            }
+                            if (data.dns) {
+                                document.getElementById('dns').value = data.dns;
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.log('加载 WiFi 配置失败:', error);
+                });
+        }
+
         // 保存 WiFi 配置
         function saveWifiConfig(event) {
             event.preventDefault();

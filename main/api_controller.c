@@ -290,6 +290,49 @@ esp_err_t save_wifi_config_api_handler(httpd_req_t *req) {
 }
 
 /**
+ * @brief 获取 WiFi 配置 API 处理函数
+ */
+esp_err_t get_wifi_config_api_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Getting WiFi config...");
+    
+    wifi_config_t_custom config = {0};
+    esp_err_t err = config_load_wifi(&config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load WiFi config: %s", esp_err_to_name(err));
+    }
+    
+    cJSON *root = cJSON_CreateObject();
+    
+    if (err == ESP_OK && config.is_configured) {
+        cJSON_AddStringToObject(root, "ssid", config.ssid);
+        cJSON_AddStringToObject(root, "password", config.password);
+        cJSON_AddBoolToObject(root, "use_static_ip", config.use_static_ip);
+        
+        if (config.use_static_ip) {
+            cJSON_AddStringToObject(root, "ip_address", config.ip_address);
+            cJSON_AddStringToObject(root, "gateway", config.gateway);
+            cJSON_AddStringToObject(root, "netmask", config.netmask);
+            cJSON_AddStringToObject(root, "dns", config.dns);
+        }
+    }
+    
+    cJSON_AddBoolToObject(root, "success", true);
+    
+    char *json_str = cJSON_PrintUnformatted(root);
+    if (json_str != NULL) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json_str, strlen(json_str));
+        cJSON_free(json_str);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+/**
  * @brief URL 解码辅助函数
  */
 void url_decode(const char *src, char *dest, size_t max_len) {

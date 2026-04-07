@@ -14,6 +14,7 @@
 #include "freertos/event_groups.h"
 #include "string.h"
 #include "esp_mac.h"
+#include "esp_netif.h"
 
 static const char *TAG = "WIFI";
 
@@ -23,10 +24,68 @@ static EventGroupHandle_t s_wifi_event_group;
 // WiFi 事件位
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
+#define WIFI_RECONNECT_BIT BIT2
 
-// 重试次数
+// 重试次数和延迟（指数退避）
 static int s_retry_num = 0;
-#define MAX_RETRY 5
+#define MIN_RETRY_DELAY_MS 1000
+#define MAX_RETRY_DELAY_MS 30000
+
+// 重连任务句柄
+static TaskHandle_t s_reconnect_task_handle = NULL;
+
+/**
+ * @brief WiFi 重连任务 - 处理断网后的无限重连逻辑
+ * @param pvParameters 任务参数
+ */
+static void wifi_reconnect_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "WiFi reconnect task started");
+    
+    while (true) {
+        EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+                WIFI_RECONNECT_BIT | WIFI_CONNECTED_BIT,
+                pdTRUE,
+                pdFALSE,
+                portMAX_DELAY);
+        
+        if (bits & WIFI_CONNECTED_BIT) {
+            ESP_LOGI(TAG, "WiFi reconnected, reset retry counter");
+            s_retry_num = 0;
+            continue;
+        }
+        
+        if (bits & WIFI_RECONNECT_BIT) {
+            s_retry_num++;
+            
+            // 计算指数退避延迟
+            int delay_ms = MIN_RETRY_DELAY_MS;
+            if (s_retry_num > 5) {
+                delay_ms = MAX_RETRY_DELAY_MS;
+            } else {
+                delay_ms = MIN_RETRY_DELAY_MS * (1 << (s_retry_num - 1));
+                if (delay_ms > MAX_RETRY_DELAY_MS) {
+                    delay_ms = MAX_RETRY_DELAY_MS;
+                }
+            }
+            
+            ESP_LOGI(TAG, "Retry connecting to the AP (attempt %d, delay %dms)", s_retry_num, delay_ms);
+            
+            // 延迟后重连
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+            
+            // 再次检查是否已经连接
+            bits = xEventGroupGetBits(s_wifi_event_group);
+            if (bits & WIFI_CONNECTED_BIT) {
+                ESP_LOGI(TAG, "WiFi already connected, skipping reconnect");
+                s_retry_num = 0;
+                continue;
+            }
+            
+            esp_wifi_connect();
+        }
+    }
+}
 
 /**
  * @brief WiFi 连接后 NTP 校时任务 - 等待几秒后执行一次 NTP 校时
@@ -61,20 +120,17 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id
         esp_wifi_connect();
         ESP_LOGI(TAG, "WiFi station started");
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < MAX_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGI(TAG, "Retry connecting to the AP (%d/%d)", s_retry_num, MAX_RETRY);
-        } else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-            ESP_LOGE(TAG, "Failed to connect to AP");
-        }
-        ESP_LOGI(TAG, "Connection to the AP failed");
+        wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
+        ESP_LOGW(TAG, "WiFi disconnected, reason: %d", event->reason);
+        
+        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        xEventGroupSetBits(s_wifi_event_group, WIFI_RECONNECT_BIT);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        xEventGroupClearBits(s_wifi_event_group, WIFI_FAIL_BIT);
         
         // 创建任务执行一次 NTP 校时
         BaseType_t ret = xTaskCreate(wifi_ntp_sync_task, "wifi_ntp_sync", 4096, NULL, 5, NULL);
@@ -120,6 +176,13 @@ esp_err_t wifi_init(void)
                                                         &wifi_event_handler,
                                                         NULL,
                                                         NULL));
+
+    // 创建重连任务
+    BaseType_t ret = xTaskCreate(wifi_reconnect_task, "wifi_reconnect", 4096, NULL, 5, &s_reconnect_task_handle);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create WiFi reconnect task");
+        return ESP_ERR_NO_MEM;
+    }
 
     ESP_LOGI(TAG, "WiFi initialized");
 
@@ -200,14 +263,47 @@ esp_err_t wifi_start_ap(const char* ssid)
 
 /**
  * @brief 启动 STA 模式 - 启动 WiFi 客户端模式
- * @param ssid WiFi SSID
- * @param password WiFi 密码
+ * @param config WiFi 完整配置
  * @return ESP_OK 成功，其他值失败
  */
-esp_err_t wifi_start_sta(const char* ssid, const char* password)
+esp_err_t wifi_start_sta(const wifi_config_t_custom* config)
 {
     // 创建 STA 网络接口
-    esp_netif_create_default_wifi_sta();
+    esp_netif_t *netif = esp_netif_create_default_wifi_sta();
+
+    // 配置静态 IP（如果启用）
+    if (config->use_static_ip) {
+        ESP_LOGI(TAG, "Configuring static IP: %s", config->ip_address);
+        
+        // 停止 DHCP 客户端
+        esp_netif_dhcpc_stop(netif);
+        
+        // 设置静态 IP 信息
+        esp_netif_ip_info_t ip_info;
+        memset(&ip_info, 0, sizeof(ip_info));
+        
+        // 转换 IP 地址 - 使用 esp_netif_str_to_ip4
+        esp_netif_str_to_ip4(config->ip_address, &ip_info.ip);
+        esp_netif_str_to_ip4(config->gateway, &ip_info.gw);
+        esp_netif_str_to_ip4(config->netmask, &ip_info.netmask);
+        
+        // 设置 IP 信息
+        esp_netif_set_ip_info(netif, &ip_info);
+        
+        // 设置 DNS 服务器
+        if (strlen(config->dns) > 0) {
+            esp_netif_dns_info_t dns_info;
+            memset(&dns_info, 0, sizeof(dns_info));
+            esp_netif_str_to_ip4(config->dns, &dns_info.ip.u_addr.ip4);
+            dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+            esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns_info);
+        }
+        
+        ESP_LOGI(TAG, "Static IP configured: IP=%s, GW=%s, Netmask=%s, DNS=%s",
+                 config->ip_address, config->gateway, config->netmask, config->dns);
+    } else {
+        ESP_LOGI(TAG, "Using DHCP for IP configuration");
+    }
 
     // 配置 STA 参数
     wifi_config_t wifi_config = {
@@ -220,8 +316,8 @@ esp_err_t wifi_start_sta(const char* ssid, const char* password)
         },
     };
 
-    strlcpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-    strlcpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
+    strlcpy((char*)wifi_config.sta.ssid, config->ssid, sizeof(wifi_config.sta.ssid));
+    strlcpy((char*)wifi_config.sta.password, config->password, sizeof(wifi_config.sta.password));
 
     // 设置 WiFi 模式
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -232,7 +328,7 @@ esp_err_t wifi_start_sta(const char* ssid, const char* password)
     // 启动 WiFi
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "WiFi STA started: SSID=%s", ssid);
+    ESP_LOGI(TAG, "WiFi STA started: SSID=%s", config->ssid);
 
     // 等待连接
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
@@ -362,7 +458,7 @@ esp_err_t wifi_auto_start(void)
     if (err == ESP_OK && wifi_config.is_configured) {
         // 有配置，启动 STA 模式
         ESP_LOGI(TAG, "Starting WiFi STA mode");
-        return wifi_start_sta(wifi_config.ssid, wifi_config.password);
+        return wifi_start_sta(&wifi_config);
     } else {
         // 无配置，启动 AP 模式
         char device_name[64];
