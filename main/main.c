@@ -83,7 +83,7 @@ static void boot_button_monitor_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Boot button monitor task started");
 
-    // 配置Boot按钮GPIO
+    // 配置 Boot 按钮 GPIO
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << BOOT_BUTTON_GPIO),
         .mode = GPIO_MODE_INPUT,
@@ -93,12 +93,22 @@ static void boot_button_monitor_task(void *pvParameters)
     };
     gpio_config(&io_conf);
 
+    // 启动防误触：若 GPIO0 上电即为低电平，等待其变为高电平再进入正常监测
+    // 避免 GPIO0 外部电路拉低或卡死时误判为用户长按导致无限重启
+    if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+        ESP_LOGW(TAG, "Boot button appears pressed at startup, waiting for release...");
+        while (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        ESP_LOGI(TAG, "Boot button released, entering normal monitoring mode");
+    }
+
     int press_start_time = 0;
     bool is_pressed = false;
     bool long_press_detected = false;
 
     while (1) {
-        // 读取Boot按钮状态（低电平表示按下）
+        // 读取 Boot 按钮状态（低电平表示按下）
         int button_level = gpio_get_level(BOOT_BUTTON_GPIO);
 
         if (button_level == 0) {
@@ -119,8 +129,15 @@ static void boot_button_monitor_task(void *pvParameters)
                     // 执行恢复出厂设置
                     esp_err_t err = config_factory_reset();
                     if (err == ESP_OK) {
-                        ESP_LOGI(TAG, "Factory reset completed, rebooting...");
-                        vTaskDelay(pdMS_TO_TICKS(1000));
+                        ESP_LOGI(TAG, "Factory reset completed, waiting for BOOT button release before rebooting...");
+                        // 等待用户释放 BOOT 按钮，避免重启后 GPIO0 低电平进入下载模式
+                        for (int i = 0; i < 150; i++) {
+                            if (gpio_get_level(BOOT_BUTTON_GPIO) == 1) {
+                                break;
+                            }
+                            vTaskDelay(pdMS_TO_TICKS(200));
+                        }
+                        ESP_LOGI(TAG, "Rebooting now...");
                         esp_restart();
                     } else {
                         ESP_LOGE(TAG, "Factory reset failed: %s", esp_err_to_name(err));
@@ -288,6 +305,10 @@ void app_main(void)
         temp_sensor = NULL;
     }
     
+    // 初始化硬件定时器（必须在 monitor_init 之前，monitor 内部依赖 get_time）
+    ESP_LOGI(TAG, "Initializing hardware timer...");
+    ESP_ERROR_CHECK(hardware_timer_init());
+
     // 初始化网站监控模块（必须在 Web 服务器启动前初始化）
     ESP_LOGI(TAG, "Initializing monitor module...");
     ESP_ERROR_CHECK(monitor_init());
@@ -311,24 +332,24 @@ void app_main(void)
     ESP_ERROR_CHECK(tcp_server_init());
     ESP_ERROR_CHECK(tcp_server_start());
 
-    // 初始化硬件定时器
-    ESP_LOGI(TAG, "Initializing hardware timer...");
-    ESP_ERROR_CHECK(hardware_timer_init());
-
     // 初始化 NTP 存储（PSRAM）
     ESP_LOGI(TAG, "Initializing NTP storage...");
     ntp_storage_init();
 
-    // 初始化 NTP 客户端
+    // 初始化 NTP 客户端（仅 STA 模式需要，AP 模式下无互联网连接）
     ESP_LOGI(TAG, "Initializing NTP client...");
-    ntp_client_config_t ntp_config = {
-        .server1 = "ntp.ntsc.ac.cn",
-        .server2 = "ntp1.aliyun.com",
-        .sync_interval = 1800,
-        .enable_client = true
-    };
-    ESP_ERROR_CHECK(ntp_client_init(&ntp_config));
-    ESP_ERROR_CHECK(ntp_client_start());
+    if (wifi_get_mode() == WIFI_MODE_AP) {
+        ESP_LOGI(TAG, "WiFi is in AP mode, skipping NTP client (no internet)");
+    } else {
+        ntp_client_config_t ntp_config = {
+            .server1 = "ntp.ntsc.ac.cn",
+            .server2 = "ntp1.aliyun.com",
+            .sync_interval = 1800,
+            .enable_client = true
+        };
+        ESP_ERROR_CHECK(ntp_client_init(&ntp_config));
+        ESP_ERROR_CHECK(ntp_client_start());
+    }
 
     // 初始化 NTP 服务器
     ESP_LOGI(TAG, "Initializing NTP server...");

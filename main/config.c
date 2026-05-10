@@ -71,15 +71,6 @@ esp_err_t config_save_wifi(const wifi_config_t_custom* config)
         return err;
     }
 
-    // 保存配置标记
-    uint8_t configured = config->is_configured ? 1 : 0;
-    err = nvs_set_u8(nvs_handle, NVS_KEY_WIFI_MODE, configured);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error saving WiFi configured flag!");
-        nvs_close(nvs_handle);
-        return err;
-    }
-
     // 保存静态 IP 配置
     uint8_t use_static = config->use_static_ip ? 1 : 0;
     if (config->use_static_ip) {
@@ -173,10 +164,8 @@ esp_err_t config_load_wifi(wifi_config_t_custom* config)
         return err;
     }
 
-    // 读取配置标记
-    uint8_t configured = 0;
-    err = nvs_get_u8(nvs_handle, NVS_KEY_WIFI_MODE, &configured);
-    config->is_configured = (configured == 1);
+    // SSID 和密码存在即视为已配置
+    config->is_configured = true;
 
     // 读取静态 IP 配置
     uint8_t use_static = 0;
@@ -593,13 +582,13 @@ bool config_has_wifi(void)
         return false;
     }
 
-    // 检查配置标记
-    uint8_t configured = 0;
-    err = nvs_get_u8(nvs_handle, NVS_KEY_WIFI_MODE, &configured);
+    // 检查 WiFi SSID 是否存在
+    size_t required_size = 0;
+    err = nvs_get_str(nvs_handle, NVS_KEY_WIFI_SSID, NULL, &required_size);
 
     nvs_close(nvs_handle);
 
-    return (err == ESP_OK && configured == 1);
+    return (err == ESP_OK && required_size > 0);
 }
 
 /**

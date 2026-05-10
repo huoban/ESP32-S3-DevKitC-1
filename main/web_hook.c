@@ -1019,18 +1019,51 @@ esp_err_t web_hook_get_wechat_access_token(const wechat_webhook_config_t* config
     // 零初始化输出
     memset(token_out, 0, sizeof(wechat_access_token_t));
 
-    // 检查 WiFi 连接状态
-    if (!wifi_is_connected()) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    // 检查缓存的 token 是否有效
+    // 检查缓存的 token 是否有效（优先于WiFi检查，缓存命中则无需联网）
     time_t now;
     time(&now);
     
     if (g_wechat_token.access_token[0] != '\0' && g_wechat_token.expire_time > now + 60) {
         memcpy(token_out, &g_wechat_token, sizeof(wechat_access_token_t));
         return ESP_OK;
+    }
+
+    // 检查 WiFi 连接状态（缓存未命中，需要联网获取新token）
+    if (!wifi_is_connected()) {
+        ESP_LOGW(TAG, "WiFi not connected, checking WiFi status and triggering reconnect if needed...");
+        
+        // 检查当前 WiFi 模式和状态
+        wifi_mode_t mode;
+        if (esp_wifi_get_mode(&mode) == ESP_OK) {
+            // 只有在 STA 模式下才尝试重连
+            if (mode == WIFI_MODE_STA || mode == WIFI_MODE_APSTA) {
+                // 先检查是否真的未连接，避免在已连接时调用 esp_wifi_connect()
+                wifi_ap_record_t ap_info;
+                if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) {
+                    ESP_LOGI(TAG, "WiFi truly disconnected, triggering reconnect...");
+                    esp_wifi_connect();
+                    
+                    // 等待重连，最多 10 秒
+                    for (int i = 0; i < 20; i++) {
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                        if (wifi_is_connected()) {
+                            ESP_LOGI(TAG, "WiFi reconnected, resuming access_token fetch");
+                            break;
+                        }
+                    }
+                } else {
+                    ESP_LOGI(TAG, "WiFi actually connected, syncing connection state...");
+                }
+            } else {
+                ESP_LOGW(TAG, "WiFi in AP mode, skipping reconnect attempt");
+            }
+        }
+        
+        // 再次检查连接状态
+        if (!wifi_is_connected()) {
+            ESP_LOGE(TAG, "WiFi not available, cannot fetch access_token");
+            return ESP_ERR_INVALID_STATE;
+        }
     }
 
     // 验证配置参数
@@ -1157,7 +1190,11 @@ esp_err_t web_hook_send_wechat_message(const wechat_webhook_config_t* config, co
     wechat_access_token_t token = {0};  // 必须初始化！
     esp_err_t err = web_hook_get_wechat_access_token(config, &token);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get access_token");
+        if (err == ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Failed to get access_token: WiFi not connected or token not cached");
+        } else {
+            ESP_LOGE(TAG, "Failed to get access_token: HTTP request error (err=%d)", err);
+        }
         return err;
     }
 

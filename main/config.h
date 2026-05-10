@@ -19,7 +19,6 @@ extern "C" {
 #define NVS_NAMESPACE "print_server"
 #define NVS_KEY_WIFI_SSID "wifi_ssid"
 #define NVS_KEY_WIFI_PASSWORD "wifi_password"
-#define NVS_KEY_WIFI_MODE "wifi_mode"
 #define NVS_KEY_NTP_CONFIG "ntp_config"
 #define NVS_KEY_MONITOR_SITES "monitor_sites"
 #define NVS_KEY_WECHAT_CONFIG "wechat_config"

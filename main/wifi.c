@@ -431,8 +431,37 @@ esp_err_t wifi_get_status(wifi_status_t* status)
  */
 bool wifi_is_connected(void)
 {
-    EventBits_t bits = xEventGroupGetBits(s_wifi_event_group);
-    return (bits & WIFI_CONNECTED_BIT) != 0;
+    // 首先检查当前 WiFi 模式
+    wifi_mode_t mode;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err != ESP_OK) {
+        return false;
+    }
+    
+    // AP 模式总是视为已连接
+    if (mode == WIFI_MODE_AP) {
+        return true;
+    }
+    
+    // STA 或 APSTA 模式，检查连接状态（双重检查确保可靠）
+    if (mode == WIFI_MODE_STA || mode == WIFI_MODE_APSTA) {
+        // 方法 1: 检查事件组标志位
+        EventBits_t bits = xEventGroupGetBits(s_wifi_event_group);
+        if ((bits & WIFI_CONNECTED_BIT) != 0) {
+            return true;
+        }
+        
+        // 方法 2: 直接检查 WiFi 连接状态（更可靠的方法）
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            // 如果能获取到 AP 信息，说明已连接，同步更新事件组标志位
+            xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+            xEventGroupClearBits(s_wifi_event_group, WIFI_FAIL_BIT | WIFI_RECONNECT_BIT);
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 /**

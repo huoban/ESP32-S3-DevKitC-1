@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
+#include "driver/gpio.h"
 #include "api_controller.h"
 #include "ntp_storage.h"
 #include "nvs_manager.h"
@@ -834,8 +835,15 @@ esp_err_t web_server_handle_post_reset(httpd_req_t* req)
     const char *response = "{\"success\":true,\"message\":\"Factory reset completed. Rebooting...\"}";
     httpd_resp_send(req, response, strlen(response));
 
-    // 重启系统
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    // 重启系统 — 等待 BOOT 按钮释放，避免进入下载模式
+    ESP_LOGI(TAG, "Waiting for BOOT button release before rebooting...");
+    for (int i = 0; i < 150; i++) {
+        if (gpio_get_level(GPIO_NUM_0) == 1) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    ESP_LOGI(TAG, "Rebooting now...");
     esp_restart();
 
     return ESP_OK;
