@@ -17,6 +17,7 @@ static const char *TAG = "NTP_SERVER";
 
 static bool g_ntp_server_running = false;
 static TaskHandle_t g_ntp_server_task_handle = NULL;
+static int g_ntp_server_sock = -1;
 
 static void ntp_server_task(void *arg)
 {
@@ -28,6 +29,8 @@ static void ntp_server_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
+
+    g_ntp_server_sock = sock;
 
     int optval = 1;
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
@@ -118,6 +121,7 @@ static void ntp_server_task(void *arg)
     }
 
     close(sock);
+    g_ntp_server_sock = -1;
     ESP_LOGI(TAG, "NTP server task ended");
     vTaskDelete(NULL);
 }
@@ -149,6 +153,11 @@ esp_err_t ntp_server_start(void) {
 
 esp_err_t ntp_server_stop(void) {
     g_ntp_server_running = false;
+    
+    if (g_ntp_server_sock >= 0) {
+        close(g_ntp_server_sock);
+        g_ntp_server_sock = -1;
+    }
     
     if (g_ntp_server_task_handle != NULL) {
         vTaskDelete(g_ntp_server_task_handle);

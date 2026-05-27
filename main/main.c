@@ -265,7 +265,7 @@ void app_main(void)
     esp_err_t err = wifi_auto_start();
     if (err == ESP_OK) {
         // WiFi 启动成功
-        if (wifi_get_mode() == WIFI_MODE_AP) {
+        if (wifi_get_mode() == WIFI_MODE_AP || wifi_get_mode() == WIFI_MODE_APSTA) {
             ESP_LOGI(TAG, "WiFi AP mode started");
             ESP_LOGI(TAG, "SSID: %s", device_name);
             ESP_LOGI(TAG, "IP: 192.168.4.1");
@@ -338,7 +338,7 @@ void app_main(void)
 
     // 初始化 NTP 客户端（仅 STA 模式需要，AP 模式下无互联网连接）
     ESP_LOGI(TAG, "Initializing NTP client...");
-    if (wifi_get_mode() == WIFI_MODE_AP) {
+    if (wifi_get_mode() == WIFI_MODE_AP || wifi_get_mode() == WIFI_MODE_APSTA) {
         ESP_LOGI(TAG, "WiFi is in AP mode, skipping NTP client (no internet)");
     } else {
         ntp_client_config_t ntp_config = {

@@ -80,6 +80,10 @@ static void client_event_cb(const usb_host_client_event_msg_t *event_msg, void *
     switch (event_msg->event) {
     case USB_HOST_CLIENT_EVENT_NEW_DEV:
         ESP_LOGI(TAG, "New USB device connected, address: %d", event_msg->new_dev.address);
+        if (event_msg->new_dev.address >= PRINTER_MAX_COUNT) {
+            ESP_LOGW(TAG, "USB device address %d exceeds max count %d, ignoring", event_msg->new_dev.address, PRINTER_MAX_COUNT);
+            break;
+        }
         xSemaphoreTake(driver_obj->constant.mux_lock, portMAX_DELAY);
         driver_obj->mux_protected.device[event_msg->new_dev.address].dev_addr = event_msg->new_dev.address;
         driver_obj->mux_protected.device[event_msg->new_dev.address].dev_hdl = NULL;
@@ -316,6 +320,8 @@ static void action_claim_interface(usb_device_t *device_obj)
                 if (err != ESP_OK) {
                     ESP_LOGE(TAG, "Failed to initialize buffer for printer %d", i);
                     g_printers[i].status = PRINTER_STATUS_ERROR;
+                    g_printers[i].dev_hdl = NULL;
+                    g_printers[i].dev_addr = 0;
                     xSemaphoreGive(g_printer_mutex);
                     continue;
                 }
@@ -564,6 +570,42 @@ esp_err_t printer_start(void)
 esp_err_t printer_stop(void)
 {
     ESP_LOGI(TAG, "Stopping printer module");
+
+    for (int i = 0; i < PRINTER_MAX_COUNT; i++) {
+        if (g_printer_task_handles[i] != NULL) {
+            vTaskDelete(g_printer_task_handles[i]);
+            g_printer_task_handles[i] = NULL;
+        }
+
+        if (g_printer_queues[i] != NULL) {
+            printer_queue_item_t item;
+            while (xQueueReceive(g_printer_queues[i], &item, 0) == pdPASS) {
+                if (item.data != NULL) {
+                    heap_caps_free(item.data);
+                }
+            }
+            vQueueDelete(g_printer_queues[i]);
+            g_printer_queues[i] = NULL;
+        }
+
+        if (g_printer_buffers[i].buffer != NULL) {
+            heap_caps_free(g_printer_buffers[i].buffer);
+            g_printer_buffers[i].buffer = NULL;
+        }
+        if (g_printer_buffers[i].sem_read != NULL) {
+            vSemaphoreDelete(g_printer_buffers[i].sem_read);
+            g_printer_buffers[i].sem_read = NULL;
+        }
+        if (g_printer_buffers[i].sem_write != NULL) {
+            vSemaphoreDelete(g_printer_buffers[i].sem_write);
+            g_printer_buffers[i].sem_write = NULL;
+        }
+    }
+
+    if (g_print_busy_event_group != NULL) {
+        vEventGroupDelete(g_print_busy_event_group);
+        g_print_busy_event_group = NULL;
+    }
 
     if (g_class_driver_task_handle != NULL) {
         vTaskDelete(g_class_driver_task_handle);

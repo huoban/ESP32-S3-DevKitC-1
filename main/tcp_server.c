@@ -285,6 +285,10 @@ esp_err_t tcp_server_start(void) {
 esp_err_t tcp_server_stop(void) {
     for (int i = 0; i < PRINTER_COUNT; i++) {
         g_printer_servers[i].is_running = false;
+        if (g_printer_servers[i].listen_sock >= 0) {
+            close(g_printer_servers[i].listen_sock);
+            g_printer_servers[i].listen_sock = -1;
+        }
         if (g_printer_servers[i].task_handle != NULL) {
             vTaskDelete(g_printer_servers[i].task_handle);
             g_printer_servers[i].task_handle = NULL;

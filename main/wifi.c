@@ -117,7 +117,14 @@ static void wifi_ntp_sync_task(void *pvParameters)
 void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        // APSTA 模式下 STA 接口启动时，检查是否有有效 SSID 配置
+        // 空配置表示 STA 仅用于扫描，不应自动连接
+        wifi_config_t current_config;
+        if (esp_wifi_get_config(WIFI_IF_STA, &current_config) == ESP_OK) {
+            if (current_config.sta.ssid[0] != '\0') {
+                esp_wifi_connect();
+            }
+        }
         ESP_LOGI(TAG, "WiFi station started");
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
@@ -202,7 +209,7 @@ esp_err_t wifi_scan_networks(wifi_ap_record_t *networks, uint16_t max_count, uin
         return ESP_ERR_INVALID_ARG;
     }
 
-    // 确保 WiFi 已初始化
+    // APSTA 或 STA 模式可直接扫描，无需切换模式
     esp_err_t ret = esp_wifi_scan_start(NULL, true);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start scan: %s", esp_err_to_name(ret));
@@ -229,8 +236,18 @@ esp_err_t wifi_scan_networks(wifi_ap_record_t *networks, uint16_t max_count, uin
  */
 esp_err_t wifi_start_ap(const char* ssid)
 {
+    // 创建 STA 网络接口（APSTA 模式需要 STA 接口用于 WiFi 扫描）
+    esp_netif_create_default_wifi_sta();
+
     // 创建 AP 网络接口
     esp_netif_create_default_wifi_ap();
+
+    // 设置 WiFi 模式为 APSTA（AP+STA 共存，STA 仅用于扫描，不连接网络）
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+
+    // 设置空 STA 配置，防止自动连接到已保存的网络
+    wifi_config_t sta_config = {0};
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
 
     // 配置 AP 参数
     wifi_config_t wifi_config = {
@@ -247,16 +264,13 @@ esp_err_t wifi_start_ap(const char* ssid)
 
     strlcpy((char*)wifi_config.ap.ssid, ssid, sizeof(wifi_config.ap.ssid));
 
-    // 设置 WiFi 模式
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-
-    // 设置 WiFi 配置
+    // 设置 AP 配置
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
 
     // 启动 WiFi
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "WiFi AP started: SSID=%s", ssid);
+    ESP_LOGI(TAG, "WiFi AP started (APSTA mode): SSID=%s", ssid);
 
     return ESP_OK;
 }
@@ -399,7 +413,7 @@ esp_err_t wifi_get_status(wifi_status_t* status)
 
     status->mode = mode;
 
-    if (mode == WIFI_MODE_STA || mode == WIFI_MODE_APSTA) {
+    if (mode == WIFI_MODE_STA) {
         wifi_ap_record_t ap_info;
         err = esp_wifi_sta_get_ap_info(&ap_info);
         if (err == ESP_OK) {
@@ -416,7 +430,7 @@ esp_err_t wifi_get_status(wifi_status_t* status)
         } else {
             status->is_connected = false;
         }
-    } else if (mode == WIFI_MODE_AP) {
+    } else if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
         status->is_connected = true;
         strlcpy(status->ip_address, "192.168.4.1", sizeof(status->ip_address));
         strlcpy(status->ssid, "AP_MODE", sizeof(status->ssid));
@@ -438,8 +452,19 @@ bool wifi_is_connected(void)
         return false;
     }
     
-    // AP 模式总是视为已连接
-    if (mode == WIFI_MODE_AP) {
+    // AP 模式或 APSTA 模式（STA 未连接网络）视为已连接
+    if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
+        // APSTA 模式下，如果 STA 已连接到网络，按 STA 连接状态处理
+        if (mode == WIFI_MODE_APSTA) {
+            EventBits_t bits = xEventGroupGetBits(s_wifi_event_group);
+            if ((bits & WIFI_CONNECTED_BIT) != 0) {
+                return true;
+            }
+            wifi_ap_record_t ap_info;
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                return true;
+            }
+        }
         return true;
     }
     

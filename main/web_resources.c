@@ -12,7 +12,7 @@
 
 static const char *TAG = "WEB_RESOURCES";
 
-// PSRAM 中存储 Web 资源的指针
+// 存储 Web 资源的指针（可在 PSRAM 或 DRAM 中）
 static web_resource_t *s_resources = NULL;
 static size_t s_resource_count = 0;
 
@@ -61,9 +61,29 @@ static const struct {
 #define EMBEDDED_RESOURCE_COUNT (sizeof(s_embedded_resources) / sizeof(s_embedded_resources[0]))
 
 /**
- * @brief 复制单个资源到 PSRAM - 自动剥离 UTF-8 BOM
+ * @brief 分配内存 - 优先 PSRAM，失败则回退到 DRAM
  */
-static esp_err_t copy_resource_to_psram(size_t index)
+static void* safe_malloc(size_t size)
+{
+    void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ptr != NULL) {
+        ESP_LOGD(TAG, "Allocated %zu bytes from PSRAM", size);
+        return ptr;
+    }
+    // 回退到普通 RAM
+    ptr = heap_caps_malloc(size, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+    if (ptr != NULL) {
+        ESP_LOGW(TAG, "Allocated %zu bytes from DRAM (PSRAM unavailable)", size);
+    } else {
+        ESP_LOGE(TAG, "Failed to allocate %zu bytes (PSRAM & DRAM both unavailable)", size);
+    }
+    return ptr;
+}
+
+/**
+ * @brief 复制单个资源 - 自动剥离 UTF-8 BOM
+ */
+static esp_err_t copy_resource_to_memory(size_t index)
 {
     const uint8_t *src = s_embedded_resources[index].data_start;
     size_t size = s_embedded_resources[index].data_end - s_embedded_resources[index].data_start;
@@ -81,22 +101,22 @@ static esp_err_t copy_resource_to_psram(size_t index)
         size--;
     }
     
-    // 从 PSRAM 分配内存
-    uint8_t *psram_data = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
-    if (psram_data == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate PSRAM for %s", s_embedded_resources[index].filename);
+    // 优先 PSRAM，失败则回退
+    uint8_t *data = safe_malloc(size);
+    if (data == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for %s", s_embedded_resources[index].filename);
         return ESP_ERR_NO_MEM;
     }
     
-    // 复制数据到 PSRAM（跳过 BOM）
-    memcpy(psram_data, src + offset, size);
+    // 复制数据（跳过 BOM）
+    memcpy(data, src + offset, size);
     
     // 保存到资源列表
     s_resources[index].filename = s_embedded_resources[index].filename;
-    s_resources[index].data = psram_data;
+    s_resources[index].data = data;
     s_resources[index].size = size;
     
-    ESP_LOGD(TAG, "Copied %s to PSRAM (%zu bytes)", s_embedded_resources[index].filename, size);
+    ESP_LOGD(TAG, "Copied %s (%zu bytes)", s_embedded_resources[index].filename, size);
     
     return ESP_OK;
 }
@@ -111,23 +131,22 @@ esp_err_t web_resources_init(void)
     ESP_LOGI(TAG, "Initializing web resources...");
     ESP_LOGI(TAG, "Found %d embedded web resources", EMBEDDED_RESOURCE_COUNT);
     
-    // 从 PSRAM 分配资源列表
-    s_resources = heap_caps_malloc(EMBEDDED_RESOURCE_COUNT * sizeof(web_resource_t), MALLOC_CAP_SPIRAM);
+    // 分配资源列表
+    s_resources = safe_malloc(EMBEDDED_RESOURCE_COUNT * sizeof(web_resource_t));
     if (s_resources == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate PSRAM for resource list");
+        ESP_LOGE(TAG, "Failed to allocate memory for resource list");
         return ESP_ERR_NO_MEM;
     }
     
     memset(s_resources, 0, EMBEDDED_RESOURCE_COUNT * sizeof(web_resource_t));
     s_resource_count = 0;
     
-    // 复制所有资源到 PSRAM
+    // 复制所有资源
     esp_err_t err = ESP_OK;
     for (size_t i = 0; i < EMBEDDED_RESOURCE_COUNT; i++) {
-        err = copy_resource_to_psram(i);
+        err = copy_resource_to_memory(i);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to copy resource %s", s_embedded_resources[i].filename);
-            // 释放已分配的资源
             web_resources_deinit();
             return err;
         }
@@ -135,8 +154,13 @@ esp_err_t web_resources_init(void)
     }
     
     ESP_LOGI(TAG, "Web resources initialized successfully");
-    ESP_LOGI(TAG, "Total size: %zu bytes", 
-             heap_caps_get_total_size(MALLOC_CAP_SPIRAM) - heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (psram_total > 0) {
+        ESP_LOGI(TAG, "PSRAM used: %zu/%zu bytes", psram_total - psram_free, psram_total);
+    } else {
+        ESP_LOGI(TAG, "PSRAM not available, all resources in DRAM");
+    }
     
     return ESP_OK;
 }
@@ -147,10 +171,10 @@ const web_resource_t* web_resources_get(const char *filename)
         return NULL;
     }
     
-    ESP_LOGI(TAG, "Looking for resource: %s", filename);
+    ESP_LOGD(TAG, "Looking for resource: %s", filename);
     
     for (size_t i = 0; i < s_resource_count; i++) {
-        ESP_LOGI(TAG, "  Comparing with: %s", s_resources[i].filename);
+        ESP_LOGD(TAG, "  Comparing with: %s", s_resources[i].filename);
         if (strcmp(s_resources[i].filename, filename) == 0) {
             ESP_LOGI(TAG, "  Found: %s", filename);
             return &s_resources[i];
@@ -177,7 +201,7 @@ void web_resources_deinit(void)
         return;
     }
     
-    // 释放所有 PSRAM 资源
+    // 释放所有资源
     for (size_t i = 0; i < s_resource_count; i++) {
         if (s_resources[i].data != NULL) {
             heap_caps_free((void *)s_resources[i].data);

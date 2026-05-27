@@ -35,7 +35,7 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "include"
-        "C:/esp/v5.5.3/esp-idf/components/usb/include"
+        "$ENV{IDF_PATH}/components/usb/include"
     REQUIRES
         "nvs_flash"
         "esp_wifi"

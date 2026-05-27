@@ -642,8 +642,13 @@ esp_err_t web_server_handle_post_config_monitor(httpd_req_t* req)
                 cJSON *url = cJSON_GetObjectItem(site, "url");
                 
                 if (name && url) {
-                    strlcpy(sites[count].name, cJSON_GetStringValue(name), sizeof(sites[count].name));
-                    strlcpy(sites[count].url, cJSON_GetStringValue(url), sizeof(sites[count].url));
+                    const char *name_str = cJSON_GetStringValue(name);
+                    const char *url_str = cJSON_GetStringValue(url);
+                    if (name_str == NULL || url_str == NULL) {
+                        continue;
+                    }
+                    strlcpy(sites[count].name, name_str, sizeof(sites[count].name));
+                    strlcpy(sites[count].url, url_str, sizeof(sites[count].url));
                     
                     // 其他参数
                     cJSON *interval = cJSON_GetObjectItem(site, "interval");
@@ -716,12 +721,12 @@ esp_err_t web_server_handle_post_config_webhook(httpd_req_t* req)
         cJSON *to_email = cJSON_GetObjectItem(smtp, "to_email");
 
         config.smtp.enabled = (enabled && cJSON_IsTrue(enabled));
-        if (smtp_server) strlcpy(config.smtp.smtp_server, cJSON_GetStringValue(smtp_server), sizeof(config.smtp.smtp_server));
+        if (smtp_server) { const char *v = cJSON_GetStringValue(smtp_server); if (v) strlcpy(config.smtp.smtp_server, v, sizeof(config.smtp.smtp_server)); }
         if (smtp_port) config.smtp.smtp_port = (uint16_t)smtp_port->valueint;
-        if (username) strlcpy(config.smtp.username, cJSON_GetStringValue(username), sizeof(config.smtp.username));
-        if (password) strlcpy(config.smtp.password, cJSON_GetStringValue(password), sizeof(config.smtp.password));
-        if (from_email) strlcpy(config.smtp.from_email, cJSON_GetStringValue(from_email), sizeof(config.smtp.from_email));
-        if (to_email) strlcpy(config.smtp.to_email, cJSON_GetStringValue(to_email), sizeof(config.smtp.to_email));
+        if (username) { const char *v = cJSON_GetStringValue(username); if (v) strlcpy(config.smtp.username, v, sizeof(config.smtp.username)); }
+        if (password) { const char *v = cJSON_GetStringValue(password); if (v) strlcpy(config.smtp.password, v, sizeof(config.smtp.password)); }
+        if (from_email) { const char *v = cJSON_GetStringValue(from_email); if (v) strlcpy(config.smtp.from_email, v, sizeof(config.smtp.from_email)); }
+        if (to_email) { const char *v = cJSON_GetStringValue(to_email); if (v) strlcpy(config.smtp.to_email, v, sizeof(config.smtp.to_email)); }
     }
 
     // 解析企业微信配置
@@ -734,10 +739,10 @@ esp_err_t web_server_handle_post_config_webhook(httpd_req_t* req)
         cJSON *touser = cJSON_GetObjectItem(wechat, "touser");
 
         config.wechat.enabled = (enabled && cJSON_IsTrue(enabled));
-        if (corpid) strlcpy(config.wechat.corpid, cJSON_GetStringValue(corpid), sizeof(config.wechat.corpid));
-        if (corpsecret) strlcpy(config.wechat.corpsecret, cJSON_GetStringValue(corpsecret), sizeof(config.wechat.corpsecret));
-        if (agentid) strlcpy(config.wechat.agentid, cJSON_GetStringValue(agentid), sizeof(config.wechat.agentid));
-        if (touser) strlcpy(config.wechat.touser, cJSON_GetStringValue(touser), sizeof(config.wechat.touser));
+        if (corpid) { const char *v = cJSON_GetStringValue(corpid); if (v) strlcpy(config.wechat.corpid, v, sizeof(config.wechat.corpid)); }
+        if (corpsecret) { const char *v = cJSON_GetStringValue(corpsecret); if (v) strlcpy(config.wechat.corpsecret, v, sizeof(config.wechat.corpsecret)); }
+        if (agentid) { const char *v = cJSON_GetStringValue(agentid); if (v) strlcpy(config.wechat.agentid, v, sizeof(config.wechat.agentid)); }
+        if (touser) { const char *v = cJSON_GetStringValue(touser); if (v) strlcpy(config.wechat.touser, v, sizeof(config.wechat.touser)); }
     }
 
     // 解析自定义 WebHook 配置
@@ -750,10 +755,10 @@ esp_err_t web_server_handle_post_config_webhook(httpd_req_t* req)
         cJSON *body_template = cJSON_GetObjectItem(custom, "body_template");
 
         config.custom.enabled = (enabled && cJSON_IsTrue(enabled));
-        if (url) strlcpy(config.custom.url, cJSON_GetStringValue(url), sizeof(config.custom.url));
-        if (method) strlcpy(config.custom.method, cJSON_GetStringValue(method), sizeof(config.custom.method));
-        if (content_type) strlcpy(config.custom.content_type, cJSON_GetStringValue(content_type), sizeof(config.custom.content_type));
-        if (body_template) strlcpy(config.custom.body_template, cJSON_GetStringValue(body_template), sizeof(config.custom.body_template));
+        if (url) { const char *v = cJSON_GetStringValue(url); if (v) strlcpy(config.custom.url, v, sizeof(config.custom.url)); }
+        if (method) { const char *v = cJSON_GetStringValue(method); if (v) strlcpy(config.custom.method, v, sizeof(config.custom.method)); }
+        if (content_type) { const char *v = cJSON_GetStringValue(content_type); if (v) strlcpy(config.custom.content_type, v, sizeof(config.custom.content_type)); }
+        if (body_template) { const char *v = cJSON_GetStringValue(body_template); if (v) strlcpy(config.custom.body_template, v, sizeof(config.custom.body_template)); }
     }
 
     cJSON_Delete(root);
@@ -801,10 +806,10 @@ esp_err_t web_server_handle_post_config_wechat(httpd_req_t* req)
     cJSON *agentid = cJSON_GetObjectItem(root, "agentid");
     cJSON *touser = cJSON_GetObjectItem(root, "touser");
 
-    if (corpid) strlcpy(config.corpid, cJSON_GetStringValue(corpid), sizeof(config.corpid));
-    if (corpsecret) strlcpy(config.corpsecret, cJSON_GetStringValue(corpsecret), sizeof(config.corpsecret));
-    if (agentid) strlcpy(config.agentid, cJSON_GetStringValue(agentid), sizeof(config.agentid));
-    if (touser) strlcpy(config.touser, cJSON_GetStringValue(touser), sizeof(config.touser));
+    if (corpid) { const char *v = cJSON_GetStringValue(corpid); if (v) strlcpy(config.corpid, v, sizeof(config.corpid)); }
+    if (corpsecret) { const char *v = cJSON_GetStringValue(corpsecret); if (v) strlcpy(config.corpsecret, v, sizeof(config.corpsecret)); }
+    if (agentid) { const char *v = cJSON_GetStringValue(agentid); if (v) strlcpy(config.agentid, v, sizeof(config.agentid)); }
+    if (touser) { const char *v = cJSON_GetStringValue(touser); if (v) strlcpy(config.touser, v, sizeof(config.touser)); }
 
     cJSON_Delete(root);
 
@@ -917,6 +922,7 @@ esp_err_t web_server_handle_webhook_test_smtp(httpd_req_t* req)
         cJSON_Delete(response);
         
         httpd_resp_sendstr(req, response_str);
+        cJSON_free(response_str);
     } else {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "SMTP test failed");
     }
@@ -961,6 +967,7 @@ esp_err_t web_server_handle_webhook_test_wechat(httpd_req_t* req)
         cJSON_Delete(response);
         
         httpd_resp_sendstr(req, response_str);
+        cJSON_free(response_str);
     } else {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to start WeChat test");
     }
@@ -1005,6 +1012,7 @@ esp_err_t web_server_handle_webhook_test_custom(httpd_req_t* req)
         cJSON_Delete(response);
         
         httpd_resp_sendstr(req, response_str);
+        cJSON_free(response_str);
     } else {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Custom webhook test failed");
     }
@@ -1046,6 +1054,7 @@ esp_err_t web_server_handle_webhook_test_all(httpd_req_t* req)
         cJSON_Delete(response);
         
         httpd_resp_sendstr(req, response_str);
+        cJSON_free(response_str);
     } else {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to start WebHook send task");
     }
@@ -1159,9 +1168,19 @@ static esp_err_t web_server_handle_monitor_site_add(httpd_req_t* req)
     cJSON *paused = cJSON_GetObjectItem(site_json, "paused");
     
     if (name && url) {
-        strlcpy(site.name, cJSON_GetStringValue(name), sizeof(site.name));
-        strlcpy(site.url, cJSON_GetStringValue(url), sizeof(site.url));
-        if (custom_host) strlcpy(site.custom_host, cJSON_GetStringValue(custom_host), sizeof(site.custom_host));
+        const char *name_str = cJSON_GetStringValue(name);
+        const char *url_str = cJSON_GetStringValue(url);
+        if (name_str == NULL || url_str == NULL) {
+            cJSON_Delete(root);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid name or url");
+            return ESP_FAIL;
+        }
+        strlcpy(site.name, name_str, sizeof(site.name));
+        strlcpy(site.url, url_str, sizeof(site.url));
+        if (custom_host) {
+            const char *host_str = cJSON_GetStringValue(custom_host);
+            if (host_str) strlcpy(site.custom_host, host_str, sizeof(site.custom_host));
+        }
         if (interval) site.interval = cJSON_GetNumberValue(interval);
         if (timeout) site.timeout = cJSON_GetNumberValue(timeout);
         if (offline_count) site.offline_count = cJSON_GetNumberValue(offline_count);
@@ -1259,9 +1278,18 @@ static esp_err_t web_server_handle_monitor_site_update(httpd_req_t* req)
     cJSON *enabled = cJSON_GetObjectItem(site_json, "enabled");
     cJSON *paused = cJSON_GetObjectItem(site_json, "paused");
     
-    if (name) strlcpy(site.name, cJSON_GetStringValue(name), sizeof(site.name));
-    if (url) strlcpy(site.url, cJSON_GetStringValue(url), sizeof(site.url));
-    if (custom_host) strlcpy(site.custom_host, cJSON_GetStringValue(custom_host), sizeof(site.custom_host));
+    if (name) {
+        const char *name_str = cJSON_GetStringValue(name);
+        if (name_str) strlcpy(site.name, name_str, sizeof(site.name));
+    }
+    if (url) {
+        const char *url_str = cJSON_GetStringValue(url);
+        if (url_str) strlcpy(site.url, url_str, sizeof(site.url));
+    }
+    if (custom_host) {
+        const char *host_str = cJSON_GetStringValue(custom_host);
+        if (host_str) strlcpy(site.custom_host, host_str, sizeof(site.custom_host));
+    }
     if (interval) site.interval = cJSON_GetNumberValue(interval);
     if (timeout) site.timeout = cJSON_GetNumberValue(timeout);
     if (offline_count) site.offline_count = cJSON_GetNumberValue(offline_count);
@@ -1355,7 +1383,7 @@ static esp_err_t web_server_handle_monitor_system_config(httpd_req_t* req)
     if (notify_interval) config.global_notify_interval = cJSON_GetNumberValue(notify_interval);
     if (timeout) config.global_timeout = cJSON_GetNumberValue(timeout);
     if (offline_count) config.global_offline_count = cJSON_GetNumberValue(offline_count);
-    if (user_agent) strlcpy(config.global_user_agent, cJSON_GetStringValue(user_agent), sizeof(config.global_user_agent));
+    if (user_agent) { const char *v = cJSON_GetStringValue(user_agent); if (v) strlcpy(config.global_user_agent, v, sizeof(config.global_user_agent)); }
     
     cJSON_Delete(root);
     

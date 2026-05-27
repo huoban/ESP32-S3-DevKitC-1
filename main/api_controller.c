@@ -185,10 +185,14 @@ esp_err_t wifi_scan_api_handler(httpd_req_t *req) {
     cJSON_AddNumberToObject(root, "count", count);
     
     char *json_str = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, strlen(json_str));
-    
-    cJSON_free(json_str);
+    if (json_str != NULL) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json_str, strlen(json_str));
+        cJSON_free(json_str);
+    } else {
+        httpd_resp_send_500(req);
+    }
+
     cJSON_Delete(root);
     
     return ESP_OK;
@@ -276,10 +280,14 @@ esp_err_t save_wifi_config_api_handler(httpd_req_t *req) {
     }
     
     char *json_str = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_str, strlen(json_str));
-    
-    cJSON_free(json_str);
+    if (json_str != NULL) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json_str, strlen(json_str));
+        cJSON_free(json_str);
+    } else {
+        httpd_resp_send_500(req);
+    }
+
     cJSON_Delete(root);
     
     // 延迟重启，让响应发送完成

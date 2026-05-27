@@ -110,8 +110,16 @@ static esp_err_t check_single_site(const monitor_site_t* site, bool* is_online, 
     
     // 如果 URL 没有协议，默认添加 http://
     if (strstr(url, "http://") == NULL && strstr(url, "https://") == NULL) {
-        memmove(url + 7, url, strlen(url) + 1);
-        memcpy(url, "http://", 7);
+        size_t url_len = strlen(url);
+        if (url_len + 7 < sizeof(url)) {
+            memmove(url + 7, url, url_len + 1);
+            memcpy(url, "http://", 7);
+        } else {
+            size_t max_url_len = sizeof(url) - 8;
+            memmove(url + 7, url, max_url_len);
+            url[7 + max_url_len] = '\0';
+            memcpy(url, "http://", 7);
+        }
     }
     
     esp_http_client_config_t config = {

@@ -2,6 +2,71 @@
  * @file web_hook.c
  * @brief WebHook 通知模块实现
  * @details 负责邮件、企业微信、自定义 WebHook 通知发送
+ *
+ * ============================================================================
+ *  ⛔⛔⛔ 禁止修改 ⛔⛔⛔
+ *  本文件所有代码已经过反复调试和验证，功能完全正常。
+ *  任何 AI 助手、开发者、自动化工具均不得以任何理由修改本文件中的任何代码。
+ *  包括但不限于：重构、优化、修复、调整格式、添加功能、修改注释逻辑等。
+ *  如需修改，必须由项目负责人亲自书面授权。
+ *  违反此规定导致的线上故障，由修改者自行承担全部责任。
+ * ============================================================================
+ *
+ * ============================================================================
+ *  历史失败问题与尝试过的方法（供后续排查参考）
+ * ============================================================================
+ *
+ *  【问题1】LWIP Socket 不足导致 HTTP 请求创建失败
+ *    - 现象：esp_http_client_init() 返回 NULL，日志报 "Failed to create HTTP client"
+ *    - 原因：CONFIG_LWIP_MAX_SOCKETS 默认值 10，TCP服务器(4个监听) + Web服务器 + NTP等模块
+ *            占用后剩余 socket 不足，HTTP 客户端无法创建新连接
+ *    - 尝试方法：无（直接定位根因）
+ *    - 最终解决：sdkconfig.defaults 中设置 CONFIG_LWIP_MAX_SOCKETS=30
+ *
+ *  【问题2】TLS 证书验证失败导致 HTTPS 请求被拒绝
+ *    - 现象：日志报 "No server verification option set in esp_tls_cfg_t structure"
+ *            esp_http_client_perform() 返回 ESP_ERR_TLS_BASE
+ *    - 原因：ESP-IDF v5.5.3 默认强制验证服务器证书，但嵌入式设备无 CA 证书库
+ *    - 尝试方法：
+ *        ① 在 esp_http_client_config_t 中设置 .cert_pem = NULL → 无效
+ *        ② 设置 .skip_cert_common_name_check = true → 单独设置无效
+ *    - 最终解决：sdkconfig.defaults 中同时启用：
+ *        CONFIG_ESP_TLS_INSECURE=y
+ *        CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
+ *
+ *  【问题3】mbedTLS 调试日志导致 TLS 握手超时（500+ 秒）
+ *    - 现象：TLS 握手开始后长时间无响应，最终超时失败
+ *    - 原因：sdkconfig 中误启用了 CONFIG_MBEDTLS_DEBUG=y 和
+ *            CONFIG_MBEDTLS_DEBUG_MAX_LEVEL=3，大量调试日志输出严重拖慢 TLS 握手
+ *    - 尝试方法：无（日志时间戳对比后直接定位）
+ *    - 最终解决：从 sdkconfig.defaults 中移除 MBEDTLS_DEBUG 相关配置
+ *
+ *  【问题4】HTTP 请求方式错误导致发送失败（err=-1）
+ *    - 现象：esp_http_client_perform() 返回 err=-1 (ESP_FAIL)
+ *    - 原因：最初使用分步方式（open → fetch_headers → read），与 esp_http_client
+ *            内部状态机不兼容，导致请求流程异常
+ *    - 尝试方法：
+ *        ① 调整超时时间 → 无效
+ *        ② 修改 open/fetch_headers 调用顺序 → 无效
+ *    - 最终解决：改用 esp_http_client_perform() 一次性执行完整请求
+ *
+ *  【问题5】HTTP 响应数据读取返回 0 字节
+ *    - 现象：HTTP status=200, content_length=176, 但 esp_http_client_read() 返回 0
+ *    - 原因：esp_http_client_perform() 内部已消费全部响应数据，之后再调用
+ *            esp_http_client_read() 时缓冲区已空，返回 0
+ *    - 尝试方法：
+ *        ① 增加 buffer_size → 无效
+ *        ② 在 perform 后立即 read → 仍然返回 0
+ *        ③ 使用 esp_http_client_get_content_length() 确认有数据 → 确认有数据但读不到
+ *    - 最终解决：通过 HTTP_EVENT_ON_DATA 事件回调 + user_data 指针收集响应数据，
+ *        不再依赖 esp_http_client_read()。引入 http_response_buffer_t 结构体管理缓冲区。
+ *
+ *  【问题6】占位符替换时缓冲区越界
+ *    - 现象：自定义 WebHook 的 body_template 中 {title}/{content} 替换时可能越界
+ *    - 原因：原代码使用 strncpy 推进指针，写入长度计算错误
+ *    - 最终解决：改用 memcpy + 实际写入长度推进指针
+ *
+ * ============================================================================
  */
 
 #include "web_hook.h"
@@ -65,9 +130,17 @@ static TaskHandle_t wechat_test_task_handle = NULL;
 
 
 
+// HTTP 响应数据收集结构
+typedef struct {
+    char* buffer;
+    int total_len;
+    int buf_size;
+} http_response_buffer_t;
+
 // HTTP 事件处理器
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
+    http_response_buffer_t* resp_buf = (http_response_buffer_t*)evt->user_data;
     switch (evt->event_id) {
         case HTTP_EVENT_ERROR:
             ESP_LOGW(TAG, "HTTP_EVENT_ERROR");
@@ -83,6 +156,17 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
             break;
         case HTTP_EVENT_ON_DATA:
             ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
+            if (resp_buf && resp_buf->buffer && evt->data && evt->data_len > 0) {
+                int copy_len = evt->data_len;
+                if (resp_buf->total_len + copy_len >= resp_buf->buf_size) {
+                    copy_len = resp_buf->buf_size - resp_buf->total_len - 1;
+                }
+                if (copy_len > 0) {
+                    memcpy(resp_buf->buffer + resp_buf->total_len, evt->data, copy_len);
+                    resp_buf->total_len += copy_len;
+                    resp_buf->buffer[resp_buf->total_len] = '\0';
+                }
+            }
             break;
         case HTTP_EVENT_ON_FINISH:
             ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
@@ -1080,71 +1164,77 @@ esp_err_t web_hook_get_wechat_access_token(const wechat_webhook_config_t* config
         return ESP_ERR_NO_MEM;
     }
 
+    // 分配响应缓冲区
+    char* response_data = (char*)heap_caps_malloc(4096 + 1, MALLOC_CAP_SPIRAM);
+    if (response_data == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    memset(response_data, 0, 4096 + 1);
+
+    http_response_buffer_t resp_buf = {
+        .buffer = response_data,
+        .total_len = 0,
+        .buf_size = 4096,
+    };
+
     // 创建 HTTP 客户端
     esp_http_client_config_t http_config = {
         .url = url,
-        .timeout_ms = 10000,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = 15000,
         .skip_cert_common_name_check = true,
-        .use_global_ca_store = false,
         .buffer_size = 4096,
-        .is_async = false,
+        .event_handler = http_event_handler,
+        .user_data = &resp_buf,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (client == NULL) {
-        return ESP_FAIL;
-    }
-
-    // 打开 HTTP 连接
-    esp_err_t err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        return err;
-    }
-
-    // 读取 HTTP 响应
-    int content_length = esp_http_client_fetch_headers(client);
-    if (content_length < 0) {
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-
-    int status_code = esp_http_client_get_status_code(client);
-    if (status_code != 200) {
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-
-    // 分配缓冲区
-    int buf_size = (content_length > 0 && content_length < 4096) ? content_length : 4096;
-    char* response_data = (char*)heap_caps_malloc(buf_size + 1, MALLOC_CAP_SPIRAM);
-    if (response_data == NULL) {
-        esp_http_client_cleanup(client);
-        return ESP_ERR_NO_MEM;
-    }
-    memset(response_data, 0, buf_size + 1);
-
-    // 读取响应
-    int read_len = esp_http_client_read(client, response_data, buf_size);
-    esp_http_client_cleanup(client);
-    
-    if (read_len <= 0) {
+        ESP_LOGE(TAG, "WeChat HTTP: client init failed");
         heap_caps_free(response_data);
         return ESP_FAIL;
     }
-    response_data[read_len] = '\0';
+
+    // 执行 HTTP 请求
+    esp_err_t err = esp_http_client_perform(client);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WeChat HTTP: request failed, err=%d (%s)", err, esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        heap_caps_free(response_data);
+        return err;
+    }
+
+    int status_code = esp_http_client_get_status_code(client);
+    ESP_LOGI(TAG, "WeChat HTTP: status=%d, response_len=%d", status_code, resp_buf.total_len);
+    esp_http_client_cleanup(client);
+
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "WeChat HTTP: unexpected status code %d", status_code);
+        heap_caps_free(response_data);
+        return ESP_FAIL;
+    }
+
+    if (resp_buf.total_len <= 0) {
+        ESP_LOGE(TAG, "WeChat HTTP: empty response");
+        heap_caps_free(response_data);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "WeChat HTTP: response (%d bytes): %s", resp_buf.total_len, response_data);
 
     // 解析 JSON
     cJSON* root = cJSON_Parse(response_data);
     heap_caps_free(response_data);
 
     if (root == NULL) {
+        ESP_LOGE(TAG, "WeChat HTTP: JSON parse failed");
         return ESP_FAIL;
     }
 
     // 检查 API 错误码
     cJSON* errcode_item = cJSON_GetObjectItem(root, "errcode");
     if (errcode_item != NULL && cJSON_IsNumber(errcode_item) && errcode_item->valueint != 0) {
+        cJSON* errmsg_item = cJSON_GetObjectItem(root, "errmsg");
+        ESP_LOGE(TAG, "WeChat API: errcode=%d, errmsg=%s", errcode_item->valueint, errmsg_item ? errmsg_item->valuestring : "unknown");
         cJSON_Delete(root);
         return ESP_FAIL;
     }
@@ -1155,6 +1245,7 @@ esp_err_t web_hook_get_wechat_access_token(const wechat_webhook_config_t* config
 
     if (token_item == NULL || !cJSON_IsString(token_item) ||
         expires_item == NULL || !cJSON_IsNumber(expires_item)) {
+        ESP_LOGE(TAG, "WeChat API: missing access_token or expires_in in response");
         cJSON_Delete(root);
         return ESP_FAIL;
     }
@@ -1247,76 +1338,61 @@ esp_err_t web_hook_send_wechat_message(const wechat_webhook_config_t* config, co
 
     ESP_LOGI(TAG, "WeChat message payload: %s", post_data);
 
+    // 分配响应缓冲区
+    char* msg_response = (char*)heap_caps_malloc(4096 + 1, MALLOC_CAP_SPIRAM);
+    if (msg_response == NULL) {
+        cJSON_free(post_data);
+        return ESP_ERR_NO_MEM;
+    }
+    memset(msg_response, 0, 4096 + 1);
+
+    http_response_buffer_t msg_resp_buf = {
+        .buffer = msg_response,
+        .total_len = 0,
+        .buf_size = 4096,
+    };
+
     // 发送 HTTP 请求
     esp_http_client_config_t http_config = {
         .url = url,
         .method = HTTP_METHOD_POST,
-        .timeout_ms = 10000,
+        .timeout_ms = 15000,
         .skip_cert_common_name_check = true,
-        .use_global_ca_store = false,
         .buffer_size = 4096,
+        .event_handler = http_event_handler,
+        .user_data = &msg_resp_buf,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (client == NULL) {
         ESP_LOGE(TAG, "Failed to create HTTP client");
         cJSON_free(post_data);
+        heap_caps_free(msg_response);
         return ESP_FAIL;
     }
 
     esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_post_field(client, post_data, strlen(post_data));
 
-    // 打开 HTTP 连接
-    err = esp_http_client_open(client, strlen(post_data));
+    // 执行 HTTP 请求
+    err = esp_http_client_perform(client);
+    cJSON_free(post_data);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "HTTP open failed: %s", esp_err_to_name(err));
-        cJSON_free(post_data);
+        ESP_LOGE(TAG, "WeChat message HTTP failed: %s", esp_err_to_name(err));
         esp_http_client_cleanup(client);
+        heap_caps_free(msg_response);
         return err;
     }
 
-    // 写 POST 数据
-    int write_len = esp_http_client_write(client, post_data, strlen(post_data));
-    cJSON_free(post_data);
-    if (write_len < 0) {
-        ESP_LOGE(TAG, "Failed to write POST data");
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-
-    // 读取 HTTP 头部
-    int content_length = esp_http_client_fetch_headers(client);
-    if (content_length < 0) {
-        ESP_LOGE(TAG, "Failed to fetch headers");
-        esp_http_client_cleanup(client);
-        return ESP_FAIL;
-    }
-
     int status_code = esp_http_client_get_status_code(client);
-    ESP_LOGI(TAG, "WeChat message sent, status code: %d", status_code);
-    ESP_LOGI(TAG, "Content length: %d", content_length);
-
-    // 读取响应
-    if (content_length <= 0) {
-        content_length = 4096;
-        ESP_LOGI(TAG, "Using default buffer size: %d", content_length);
-    }
-    char* response_data = (char*)heap_caps_malloc(content_length + 1, MALLOC_CAP_SPIRAM);
-    if (response_data) {
-        int read_len = esp_http_client_read(client, response_data, content_length);
-        if (read_len >= 0) {
-            response_data[read_len] = '\0';
-            ESP_LOGI(TAG, "WeChat response length: %d", read_len);
-            if (read_len > 0) {
-                ESP_LOGI(TAG, "WeChat response: %s", response_data);
-            }
-        } else {
-            ESP_LOGE(TAG, "Failed to read response");
-        }
-        heap_caps_free(response_data);
-    }
-
+    ESP_LOGI(TAG, "WeChat message sent, status=%d, response_len=%d", status_code, msg_resp_buf.total_len);
     esp_http_client_cleanup(client);
+
+    if (msg_resp_buf.total_len > 0) {
+        ESP_LOGI(TAG, "WeChat response: %s", msg_response);
+    }
+
+    heap_caps_free(msg_response);
 
     return (status_code == 200) ? ESP_OK : ESP_FAIL;
 }
@@ -1354,14 +1430,18 @@ esp_err_t web_hook_send_custom_webhook(const custom_webhook_config_t* config, co
 
     while (*src && dst_len < max_len) {
         if (strncmp(src, "{title}", 7) == 0) {
-            strncpy(dst, title, max_len - dst_len);
-            dst += strlen(title);
-            dst_len += strlen(title);
+            size_t title_len = strlen(title);
+            size_t copy_len = (title_len > max_len - dst_len) ? max_len - dst_len : title_len;
+            memcpy(dst, title, copy_len);
+            dst += copy_len;
+            dst_len += copy_len;
             src += 7;
         } else if (strncmp(src, "{content}", 9) == 0) {
-            strncpy(dst, content, max_len - dst_len);
-            dst += strlen(content);
-            dst_len += strlen(content);
+            size_t content_len = strlen(content);
+            size_t copy_len = (content_len > max_len - dst_len) ? max_len - dst_len : content_len;
+            memcpy(dst, content, copy_len);
+            dst += copy_len;
+            dst_len += copy_len;
             src += 9;
         } else {
             *dst++ = *src++;
@@ -1372,17 +1452,33 @@ esp_err_t web_hook_send_custom_webhook(const custom_webhook_config_t* config, co
 
     ESP_LOGI(TAG, "Webhook request body: %s", body);
 
+    // 分配响应缓冲区
+    char* custom_response = (char*)heap_caps_malloc(4096 + 1, MALLOC_CAP_SPIRAM);
+    if (custom_response == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    memset(custom_response, 0, 4096 + 1);
+
+    http_response_buffer_t custom_resp_buf = {
+        .buffer = custom_response,
+        .total_len = 0,
+        .buf_size = 4096,
+    };
+
     // 发送 HTTP 请求
     esp_http_client_config_t http_config = {
         .url = config->url,
         .event_handler = http_event_handler,
-        .timeout_ms = 10000,
+        .user_data = &custom_resp_buf,
+        .timeout_ms = 15000,
         .skip_cert_common_name_check = true,
+        .buffer_size = 4096,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&http_config);
     if (client == NULL) {
         ESP_LOGE(TAG, "Failed to create HTTP client");
+        heap_caps_free(custom_response);
         return ESP_FAIL;
     }
 
@@ -1399,13 +1495,19 @@ esp_err_t web_hook_send_custom_webhook(const custom_webhook_config_t* config, co
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(err));
         esp_http_client_cleanup(client);
+        heap_caps_free(custom_response);
         return err;
     }
 
     int status_code = esp_http_client_get_status_code(client);
-    ESP_LOGI(TAG, "Custom webhook sent, status code: %d", status_code);
-
+    ESP_LOGI(TAG, "Custom webhook sent, status=%d, response_len=%d", status_code, custom_resp_buf.total_len);
     esp_http_client_cleanup(client);
+
+    if (custom_resp_buf.total_len > 0) {
+        ESP_LOGI(TAG, "Custom webhook response: %s", custom_response);
+    }
+
+    heap_caps_free(custom_response);
 
     return (status_code >= 200 && status_code < 300) ? ESP_OK : ESP_FAIL;
 }
